@@ -78,7 +78,6 @@ main{max-width:820px;margin:-10px auto 0;padding:0 10px 80px;position:relative;z
 @media(max-width:360px){.detail{grid-template-columns:90px 1fr}.balance{font-size:23px}}
 </style>
 <style>/* MODE BERSIH - V24: sembunyikan penjelasan panjang, tampil hanya kalau tombol Info ditekan. Logika saldo TIDAK diubah. */
-#fixAdminSaldoBtn{display:none!important}
 #panelInfoAdmin{display:none!important}
 #panelInfoAdmin.show{display:block!important}
 .btn-info-bersih{background:#fff;border:1px solid #ddd;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer}
@@ -97,7 +96,7 @@ main{max-width:820px;margin:-10px auto 0;padding:0 10px 80px;position:relative;z
 <div style="font-size:11px;color:#666">Admin hanya terima 5% dari mitra & kurir. Modal penjualan punya mitra, ongkir punya kurir. Bukan uang admin.</div>
 <!-- RINCIAN CONTOH PINDAH KE SINI (dari bawah) -->
 <div style="margin-top:8px"><b>Rincian 1 Pesanan Contoh (aturan baru):</b> Total Rp 110.000 = Produk Rp 100.000 + Ongkir Rp 10.000. Mitra dapat Rp 95.000 (95% produk), Kurir dapat Rp 9.500 (95% ongkir), Admin dapat Rp 5.500 (5% produk 5.000 + 5% ongkir 500). Yang masuk saldo admin cuma <b>Rp 5.500</b>, bukan Rp 110.000. Kalau mitra proses sendiri, mitra dapat Rp 104.500 (95.000 + 9.500), admin tetap Rp 5.500.</div>
-<div style="margin-top:8px;font-size:11px;color:#666">Pembagian saldo hanya boleh dilakukan melalui verifikasi admin pada antrean pesanan. Tombol perbaikan saldo lama dinonaktifkan untuk mencegah pembayaran ganda.</div>
+<div style="margin-top:8px;font-size:11px;color:#666">Perbaiki hanya untuk pesanan SUDAH SELESAI (sudah disetujui). Pembagian baca dari collection orders (mitraDapat / kurirDapat / adminFee dari checkout), bukan hitung ulang di sini. Yang masih menunggu verifikasi resi, pakai tombol Setujui di atas. Tombol ini HANYA menjumlah 5% (laba admin) dari semua pesanan status selesai yang belum dihitung ke admin, lalu masukkan ke admin_saldo/total. Kalau sudah pernah diperbaiki, tidak akan double.</div>
 </div>
 <div class="wallet-row">
 <div class="wallet-stat"><div class="label">Total 5% Terkumpul (Laba Admin)</div><div class="value" id="income">Memuat...</div></div>
@@ -154,7 +153,7 @@ async function getProfileAny(u){
 let _unsubAdminSaldo=null;
 async function hitungRincianPenjualan(){
   try{
-    const snap = await getDocs(query(collection(db,'orders'), where('status','==','terverifikasi'), limit(100)));
+    const snap = await getDocs(query(collection(db,'orders'), where('status','==','selesai'), limit(100)));
     let modal=0, ongkir=0;
     snap.docs.forEach(d=>{
       const x=d.data();
@@ -244,50 +243,32 @@ async function loadDitolakQueue(){
     }).join('');
   }catch(e){ box.innerHTML='<div style="font-size:12px;color:#b42318">Gagal: '+esc(e.message)+'</div>'; }
 }
-function hitungSettlementOrder(x){
- const isOjek=String(x.jenisOrder||x.jenisLayanan||x.tipeOrder||'').toLowerCase()==='ojek' || (!!x.titikJemput && !!x.titikTujuan && !Array.isArray(x.items));
- const sub=Number(x.subtotal??x.subTotal??0)||0;
- const ong=Number(x.ongkir??x.ongkosKirim??x.total??0)||0;
- const adminProduk=isOjek?0:Math.ceil(sub*0.05);
- const adminOngkir=Math.ceil(ong*0.05);
- const adminFee=adminProduk+adminOngkir;
- const isCOD=String(x.metodePembayaran??x.metodeBayar??x.payment??'').toLowerCase()==='cod'||x.metodeCOD===true||String(x.statusPembayaran||'').toLowerCase()==='cod';
- const mitraUid=String(x.mitraUid||x.mitraUsahaUid||x.acceptedByMitraUid||x.ownerUid||'');
- const kurirUid=String(x.kurirUid||'');
- const mitraProduk=Math.round(sub*0.95), kurirOngkir=Math.round(ong*0.95);
- if(isOjek)return {isOjek,isCOD:true,sub,ong,adminFee:adminOngkir,mitraUid:'',kurirUid,mitraCredit:0,kurirCredit:0,mitraDebit:0,kurirDebit:adminOngkir,adminCredit:adminOngkir};
- if(isCOD && kurirUid)return {isOjek,isCOD,sub,ong,adminFee,mitraUid,kurirUid,mitraCredit:mitraProduk,kurirCredit:0,mitraDebit:0,kurirDebit:mitraProduk+adminFee,adminCredit:adminFee};
- if(isCOD)return {isOjek,isCOD,sub,ong,adminFee,mitraUid,kurirUid:'',mitraCredit:0,kurirCredit:0,mitraDebit:adminFee,kurirDebit:0,adminCredit:adminFee};
- if(kurirUid)return {isOjek,isCOD,sub,ong,adminFee,mitraUid,kurirUid,mitraCredit:mitraProduk,kurirCredit:kurirOngkir,mitraDebit:0,kurirDebit:0,adminCredit:adminFee};
- return {isOjek,isCOD,sub,ong,adminFee,mitraUid,kurirUid:'',mitraCredit:mitraProduk+kurirOngkir,kurirCredit:0,mitraDebit:0,kurirDebit:0,adminCredit:adminFee};
-}
 async function loadVerifikasiResi(){
- const box=$('verifikasiResiQueue'); if(!box) return;
- try{
-  const [newSnap,legacySnap]=await Promise.all([getDocs(query(collection(db,'orders'),where('status','==','selesai'),limit(50))),getDocs(query(collection(db,'orders'),where('status','==','menunggu_verifikasi_admin'),limit(50)))]);
-  const docs=[...new Map([...newSnap.docs,...legacySnap.docs].map(d=>[d.id,d])).values()].filter(d=>{const x=d.data()||{};return x.saldoDibagi!==true&&x.adminFeeDibayar!==true;});
-  if(!docs.length){box.innerHTML='<div style="font-size:12px;color:#999">Tidak ada pesanan menunggu verifikasi</div>';return;}
-  box.innerHTML=await Promise.all(docs.map(async d=>{
-   const x={id:d.id,...d.data()},sp=hitungSettlementOrder(x);
-   let namaMitra='Mitra';
-   if(sp.mitraUid){try{const us=await getDoc(doc(db,'users',sp.mitraUid));if(us.exists())namaMitra=us.data().nama||us.data().namaUsaha||namaMitra;}catch(_){}}
-   const proof=x.resiOcrText||x.buktiPenyerahanOcr||x.buktiSerahTerimaOcr||'';
-   const isPaid=sp.isCOD||x.danaTertahan===true||x.dibayarPakaiSaldo===true||['lunas','lunas_saldo','terverifikasi','berhasil','paid'].includes(String(x.statusPembayaran||'').toLowerCase());
-   let splitInfo='';
-   if(sp.isOjek)splitInfo=`Ojek: potong kurir ${money(sp.kurirDebit)} → admin ${money(sp.adminCredit)}`;
-   else if(sp.isCOD&&sp.kurirUid)splitInfo=`COD kurir: potong kurir ${money(sp.kurirDebit)} • mitra +${money(sp.mitraCredit)} • admin +${money(sp.adminCredit)}`;
-   else if(sp.isCOD)splitInfo=`COD mitra: cash di mitra • potong mitra ${money(sp.mitraDebit)} → admin ${money(sp.adminCredit)}`;
-   else splitInfo=`Non-COD: mitra +${money(sp.mitraCredit)} • kurir +${money(sp.kurirCredit)} • admin +${money(sp.adminCredit)}`;
-   return `<div class="item" style="border:1px solid #eee;border-radius:10px;padding:10px;margin-bottom:8px">
-    <strong>${esc(x.nomorPesanan||x.id)} - ${esc(sp.isOjek?'Order Ojek':namaMitra)}</strong>
-    <div style="font-size:12px;color:#444;margin-top:4px">${sp.isOjek?'Ongkos':`Subtotal ${money(sp.sub)} • Ongkir ${money(sp.ong)}`} • ${sp.isCOD?'COD / Tunai':'Non-COD'} • Admin: <b>${money(sp.adminCredit)}</b></div>
-    <div style="font-size:12px;margin-top:5px">${esc(splitInfo)}</div>
-    ${!sp.isOjek?`<div style="margin-top:8px;background:#f7faf8;border:1px solid #e2eee7;border-radius:8px;padding:8px"><b style="font-size:11px">📄 BUKTI OCR:</b><div style="font-size:12px;white-space:pre-wrap;margin-top:4px">${esc(proof||'(tidak ada teks OCR)')}</div></div>`:''}
-    ${!isPaid?'<div style="color:#b42318;font-size:12px;margin-top:7px">Pembayaran Non-COD belum tercatat sebagai dana tertahan/lunas. Verifikasi pembayaran terlebih dahulu.</div>':''}
-    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-yellow" data-action="approve-resi" data-id="${esc(x.id)}" ${!isPaid?'disabled':''}>✅ Verifikasi & Proses Saldo</button><button class="btn btn-black" data-action="reject" data-col="orders" data-id="${esc(x.id)}">Tolak</button></div>
-   </div>`;
-  })).then(a=>a.join(''));
- }catch(e){box.innerHTML='<div style="font-size:12px;color:#b42318">Gagal: '+esc(e.message)+'</div>';}
+  const box=$('verifikasiResiQueue'); if(!box) return;
+  try{
+    const q=query(collection(db,'orders'), where('status','==','menunggu_verifikasi_admin'), limit(20));
+    const snap=await getDocs(q).catch(()=>({docs:[]}));
+    if(!snap.docs?.length){ box.innerHTML='<div style="font-size:12px;color:#999">Tidak ada resi menunggu verifikasi</div>'; return; }
+    box.innerHTML = await Promise.all(snap.docs.map(async d=>{
+      const x={id:d.id, ...d.data()};
+      const total=Number(x.total||0);
+      let sub=Number(x.subtotal ?? x.subTotal ?? 0);
+      let ong=Number(x.ongkir ?? x.ongkosKirim ?? 0);
+      if(!sub && total && ong) sub=total-ong;
+      if(!sub && total && !ong) sub=total;
+      const adminFee=Number(x.adminFee||0) || Math.round((sub+ong)*0.05);
+      const mitraUid=String(x.mitraUid||x.mitraUsahaUid||x.acceptedByMitraUid||x.ownerUid||'');
+      let mitraNama='Mitra';
+      try{ const us=await getDoc(doc(db,'users',mitraUid)); if(us.exists()) mitraNama=us.data().nama||us.data().namaUsaha||mitraNama; }catch(_){}
+      const mitraCredit = x.kurirUid ? sub : Math.max(0, (sub+ong)-adminFee);
+      return `<div class="item" style="border:1px solid #eee;border-radius:10px;padding:10px;margin-bottom:8px">
+        <strong>${esc(x.nomorPesanan||x.id)} - ${esc(mitraNama)}</strong>
+        <div style="font-size:12px;color:#444;margin-top:4px">Total: <b>${money(total)}</b> • Subtotal: ${money(sub)} • Ongkir: ${money(ong)} • Admin 5%: <b>${money(adminFee)}</b> • Mitra dapat: <b>${money(mitraCredit)}</b></div>
+        <div style="margin-top:8px;background:#f7faf8;border:1px solid #e2eee7;border-radius:8px;padding:8px"><b style="font-size:11px">📄 RESI (OCR) - CEK DULU SEBELUM SETUJUI:</b><div style="font-size:12px;white-space:pre-wrap;margin-top:4px">${esc(x.resiOcrText||'(tidak ada teks resi)')}</div><div style="font-size:11px;color:#666;margin-top:4px">File: ${esc(x.resiNamaFile||'-')}</div></div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-yellow" data-action="approve-resi" data-id="${esc(x.id)}" data-mitra="${esc(mitraUid)}" data-adminfee="${adminFee}" data-mitrac="${mitraCredit}">✅ Cek Resi Sudah Benar - Setujui & Bagi Saldo</button><button class="btn btn-black" data-action="reject" data-col="orders" data-id="${esc(x.id)}">Tolak</button></div>
+      </div>`;
+    })).then(a=>a.join(''));
+  }catch(e){ box.innerHTML='<div style="font-size:12px;color:#b42318">Gagal: '+esc(e.message)+'</div>'; }
 }
 async function loadQueues(){
  try{
@@ -373,180 +354,210 @@ window.addEventListener('pageshow',()=>{if(user){loadAdminWallet();loadQueues()}
     if(!confirm('Hitung ulang saldo admin 5% dari semua pesanan selesai yang belum dihitung? Ini tidak akan double.')) return;
     const btn=$('fixAdminSaldoBtn'); btn.disabled=true; btn.textContent='Menghitung...';
     try{
-      // V4: Selesaikan dulu titipan kurir dari tracking (kurir gagal update orders karena Rules lama)
+      // Migrasi titipan tracking dibuat atomik agar dua admin tidak memproses tracking yang sama.
       try{
         const tq = await getDocs(query(collection(db,'tracking'), where('perluAdminSelesaikan','==',true)));
-        let diprosesTracking = 0;
-        for(const d of tq.docs){
-          const tr = d.data()||{};
-          const oid = tr.orderId || d.id;
-          const oref = doc(db,'orders',oid);
-          const osnap = await getDoc(oref);
-          if(osnap.exists() && osnap.data().status !== 'selesai'){
-            await updateDoc(oref, {
-              kurirUid: tr.kurirUid || osnap.data().kurirUid || '',
-              mitraUid: tr.mitraUid || osnap.data().mitraUid || osnap.data().mitraUsahaUid || osnap.data().acceptedByMitraUid || '',
-              status:'selesai',
-              selesaiAt: serverTimestamp(),
-              adminFee: Number(tr.adminFee||0),
-              adminFeeDibayar:true,
-              adminFeeDibayarAt: serverTimestamp(),
-              adminSaldoMasuk:false,
-              kurirSaldoDipotong:false,
-              perluPotongKurir:true,
-              mitraSaldoMasuk:false,
-              kurirTerima: Number(tr.kurirTerima||0),
-              updatedAt: serverTimestamp()
-            });
-            diprosesTracking++;
-          }
-          await updateDoc(doc(db,'tracking',d.id), { perluAdminSelesaikan:false, diprosesAdminAt: serverTimestamp(), updatedAt: serverTimestamp() });
-        }
-        if(diprosesTracking>0) console.log('V6 tracking diproses:', diprosesTracking);
-      }catch(e){ console.log('V6 tracking fallback:', e.message); }
-      const qs=await getDocs(query(collection(db,'orders'), where('status','==','selesai')));
-      let tambah=0, hitung=0, skip=0;
-      const toMark=[];
-      const toPotongKurir=[];
-      const toBagiMitra=[]; const toBagiKurir=[];
-      qs.forEach(d=>{
-        const o=d.data()||{};
-        // V6: Potong kurir terpisah, jangan skip kalau admin sudah masuk tapi kurir belum dipotong
-        // SINGLE SOURCE PEMBAGIAN (aturan baru 95% / 95% / 5%):
-        // Nominal asli cuma di collection orders (dari checkout): mitraDapat, kurirDapat, adminFee. Admin JANGAN hitung ulang di sini, biar nggak beda-beda.
-        // Contoh: produk 100.000, ongkir 10.000 -> mitraDapat 95.000, kurirDapat 9.500, adminFee 5.500.
-        // Order lama yang belum simpan mitraDapat/kurirDapat (checkout lama), baru hitung fallback: mitraDapat = 95% subtotal, kurirDapat = 95% ongkir, adminFee = 5% total.
-        const _totAdm = Number(o.total||0);
-        let _subAdm = Number(o.subtotal ?? o.subTotal ?? 0);
-        let _ongAdm = Number(o.ongkir ?? o.ongkosKirim ?? 0);
-        if(!_subAdm && _totAdm && _ongAdm) _subAdm = _totAdm - _ongAdm;
-        if(!_subAdm && _totAdm && !_ongAdm) _subAdm = _totAdm;
-        const _isCODadm = String(o.metodePembayaran||o.metodeBayar||o.payment||'').toLowerCase()==='cod' || o.metodeCOD===true || String(o.statusPembayaran||'').toLowerCase()==='cod';
-        const _isProdukAdm = !!(o.mitraUid || o.mitraUsahaUid || o.mitraNama || o.mitraLat || (Array.isArray(o.items) && o.items.length>0) || (Array.isArray(o.mitraGroups) && o.mitraGroups.length>0));
-        const _isCODProdukAdm = _isCODadm && _isProdukAdm;
-        // Pakai yang disimpan checkout dulu, fallback hitung kalau order lama
-        const _mitraDapatAdm = Number(o.mitraDapat ?? o.setorMitra ?? 0) || Math.round(_subAdm*0.95);
-        const _kurirDapatAdm = Number(o.kurirDapat ?? o.setorKurir ?? 0) || Math.round(_ongAdm*0.95);
-        const feeKurir = Number(o.adminFee ?? o.adminDapat ?? 0) || Math.ceil((_subAdm+_ongAdm)*0.05);
-        // COD PRODUK, kurir yang antar: potong kurir = mitraDapat + adminFee (contoh: 95.000 + 5.500 = 100.500). Kurir terima cash total, sisa 9.500 itu ongkirnya.
-        // COD OJEK (nggak ada produk): potong kurir = adminFee ongkir aja, nggak ada mitraDapat.
-        const _potongAdm = _isCODProdukAdm ? (_mitraDapatAdm + feeKurir) : feeKurir;
-        const perluPotong = o.kurirUid && o.kurirSaldoDipotong!==true && _potongAdm>0 && _isCODadm;
-        if(perluPotong) toPotongKurir.push({id:d.id, kurirUid:String(o.kurirUid), fee:_potongAdm});
-        const mitraUid = String(o.mitraUid || o.mitraUsahaUid || o.acceptedByMitraUid || o.ownerUid || o.mitraId || o.sellerUid || '');
-        // ATURAN COD PRODUK (dari halaman mitra):
-        // - Mitra proses sendiri: mitra sudah terima cash total, JANGAN bagi saldo ke mitra lagi. Potong saldo mitra 5% total buat admin.
-        // - Kurir proses: bagi mitra harga produk (dari talang kurir), potong kurir harga produk + admin 5% ongkir.
-        const _isMitraSelf = (_isCODProdukAdm || !_isCODadm) && !o.kurirUid && (String(o.diprosesOleh||'')==='mitra' || String(o.metodePenyerahan||'')==='mitra_kirim_sendiri' || String(o.metodePenyerahan||'')==='via_expedisi' || o.mitraKirimSendiri===true || String(o.status||'')==='diantar_mitra');
-        if(_isMitraSelf){
-          // MITRA PROSES SENDIRI: ongkir buat mitra juga. Mitra dapat mitraDapat + kurirDapat = 95.000 + 9.500 = 104.500 (kalau transfer, admin yang bagi).
-          // Kalau COD, mitra sudah pegang cash 110.000, jadi JANGAN bagi lagi, cuma potong adminFee 5.500 dari saldo mitra.
-          const _feeMitraSelf = feeKurir; // 5.500, dari single source (checkout)
-          if(_isCODadm){
-            if(mitraUid && o.mitraSaldoDipotong!==true && _feeMitraSelf>0){
-              toPotongKurir.push({id:d.id, kurirUid:mitraUid, fee:_feeMitraSelf, isMitraSelf:true});
+        for(const td of tq.docs){
+          const trackingRef=doc(db,'tracking',td.id);
+          const oid=td.data()?.orderId || td.id;
+          const orderRef=doc(db,'orders',oid);
+          await runTransaction(db,async tx=>{
+            const trackingSnap=await tx.get(trackingRef);
+            const orderSnap=await tx.get(orderRef);
+            if(!trackingSnap.exists() || trackingSnap.data()?.perluAdminSelesaikan!==true) return;
+            if(orderSnap.exists()){
+              const od=orderSnap.data()||{};
+              const st=String(od.status||'').toLowerCase();
+              // Jangan menghidupkan ulang order yang sudah selesai/terverifikasi.
+              if(st!=='selesai' && st!=='terverifikasi'){
+                const tr=trackingSnap.data()||{};
+                tx.update(orderRef,{
+                  kurirUid:tr.kurirUid || od.kurirUid || '',
+                  mitraUid:tr.mitraUid || od.mitraUid || od.mitraUsahaUid || od.acceptedByMitraUid || '',
+                  status:'selesai',
+                  selesaiAt:serverTimestamp(),
+                  adminFee:Number(tr.adminFee||od.adminFee||0),
+                  adminSaldoMasuk:od.adminSaldoMasuk===true,
+                  kurirSaldoDipotong:od.kurirSaldoDipotong===true,
+                  perluPotongKurir:od.perluPotongKurir===true,
+                  mitraSaldoMasuk:od.mitraSaldoMasuk===true,
+                  kurirTerima:Number(tr.kurirTerima||od.kurirTerima||0),
+                  updatedAt:serverTimestamp()
+                });
+              }
             }
-            // Jangan masuk toBagiMitra - mitra sudah pegang cash COD
-          } else {
-            // Transfer, mitra self: bagi mitra 104.500 (95.000 + 9.500)
-            if(mitraUid && o.mitraSaldoMasuk!==true){
-              const _creditSelf = _mitraDapatAdm + _kurirDapatAdm;
-              if(_creditSelf>0) toBagiMitra.push({id:d.id, mitraUid:mitraUid, credit:_creditSelf});
-            }
-          }
-        } else if(mitraUid && o.mitraSaldoMasuk!==true){
-          // KURIR ANTAR: mitra dapat mitraDapat aja = 95.000 (bukan subtotal full 100.000, karena 5.000 sudah buat admin).
-          if(_mitraDapatAdm>0) toBagiMitra.push({id:d.id, mitraUid:mitraUid, credit:_mitraDapatAdm});
+            tx.update(trackingRef,{perluAdminSelesaikan:false,diprosesAdminAt:serverTimestamp(),updatedAt:serverTimestamp()});
+          });
         }
-        // TRANSFER (bukan COD): kurir dapat kurirDapat = 9.500 dari admin (uang pelanggan sudah di admin).
-        if(!_isCODadm && o.kurirUid && o.kurirSaldoMasuk!==true && _kurirDapatAdm>0){
-          toBagiKurir.push({id:d.id, kurirUid:String(o.kurirUid), credit:_kurirDapatAdm});
-        }
-        if(o.adminSaldoMasuk===true){ skip++; return; }
-        const total=Number(o.total||0);
-        let sub=Number(o.subtotal ?? o.subTotal ?? 0);
-        let ongkir=Number(o.ongkir ?? o.ongkosKirim ?? 0);
-        if(!sub && total && ongkir) sub=total-ongkir;
-        if(!sub && total && !ongkir) sub=total;
-        const kotor=sub+ongkir;
-        // Pakai adminFee yang sudah dihitung kurir kalau ada, biar pas dengan yang dipotong
-        const adminCredit = feeKurir>0 ? feeKurir : Math.round(kotor*0.05);
-        if(adminCredit>0){ tambah+=adminCredit; hitung++; toMark.push(d.id); }
-        else skip++;
-      });
-      if(tambah===0 && toPotongKurir.length===0 && toBagiMitra.length===0 && toBagiKurir.length===0){ msg('Tidak ada pesanan selesai yang belum dihitung ke admin. Saldo sudah benar.', true); btn.disabled=false; btn.textContent='🔧 Perbaiki Saldo Admin - + Selesaikan Titipan Kurir + Potong Kurir + Bagi Mitra'; return; }
-      await runTransaction(db, async tx=>{
-        const ref=doc(db,'admin_saldo','total');
-        const snap=await tx.get(ref);
-        const d=snap.exists()?snap.data():{};
-        const oldSaldo=Number(d.saldo||0);
-        const oldPend=Number(d.totalPendapatanPesanan??d.totalPendapatan??0);
-        // Semua baca dulu
+      }catch(e){ console.log('Migrasi tracking:',e.message); }
+
+      // Ambil ID kandidat di luar transaksi, tetapi SEMUA keputusan bayar dan penanda
+      // diproses ulang dari snapshot terbaru DI DALAM transaksi.
+      const candidateSnap=await getDocs(query(collection(db,'orders'),where('status','==','selesai')));
+      const result=await runTransaction(db,async tx=>{
+        const adminRef=doc(db,'admin_saldo','total');
+        const adminSnap=await tx.get(adminRef);
+        const adminData=adminSnap.exists()?adminSnap.data():{};
         const orderSnaps=[];
-        for(const id of toMark){ const oref=doc(db,'orders',id); const osnap=await tx.get(oref); orderSnaps.push({oref, osnap}); }
-        // V6: Baca saldo kurir yang perlu dipotong
-        const kurirSnaps=[];
-        for(const pk of toPotongKurir){
-          const uref=doc(db,'users',pk.kurirUid);
-          const usnap=await tx.get(uref);
-          kurirSnaps.push({uref, usnap, fee:pk.fee, orderId:pk.id, isMitraSelf:!!pk.isMitraSelf});
+        for(const candidate of candidateSnap.docs){
+          const ref=doc(db,'orders',candidate.id);
+          const snap=await tx.get(ref);
+          if(snap.exists()) orderSnaps.push({id:candidate.id,ref,snap,data:snap.data()||{}});
         }
-        const mitraSnaps=[];
-        for(const pm of toBagiMitra){
-          const mref=doc(db,'users',pm.mitraUid);
-          const msnap=await tx.get(mref);
-          mitraSnaps.push({mref, msnap, credit:pm.credit, orderId:pm.id});
+
+        let adminTambah=0, adminCount=0, alreadyCount=0;
+        const actions=[];
+        const orderChanges=new Map();
+        const changeFor=id=>{
+          if(!orderChanges.has(id)) orderChanges.set(id,{});
+          return orderChanges.get(id);
+        };
+        for(const item of orderSnaps){
+          const o=item.data;
+          if(String(o.status||'').toLowerCase()!=='selesai') continue;
+          const total=Number(o.total||0);
+          let sub=Number(o.subtotal??o.subTotal??0);
+          let ong=Number(o.ongkir??o.ongkosKirim??0);
+          if(!sub && total && ong) sub=total-ong;
+          if(!sub && total && !ong) sub=total;
+
+          const isCOD=String(o.metodePembayaran||o.metodeBayar||o.payment||'').toLowerCase()==='cod'
+            || o.metodeCOD===true
+            || String(o.statusPembayaran||'').toLowerCase()==='cod';
+          const isProduk=!!(o.mitraUid||o.mitraUsahaUid||o.mitraNama||o.mitraLat
+            || (Array.isArray(o.items)&&o.items.length>0)
+            || (Array.isArray(o.mitraGroups)&&o.mitraGroups.length>0));
+          const isCODProduk=isCOD&&isProduk;
+          const mitraDapat=Number(o.mitraDapat??o.setorMitra??0)||Math.round(sub*0.95);
+          const kurirDapat=Number(o.kurirDapat??o.setorKurir??0)||Math.round(ong*0.95);
+          const fee=Number(o.adminFee??o.adminDapat??0)||Math.ceil((sub+ong)*0.05);
+          const mitraUid=String(o.mitraUid||o.mitraUsahaUid||o.acceptedByMitraUid||o.ownerUid||o.mitraId||o.sellerUid||'');
+          const isMitraSelf=!!mitraUid && !o.kurirUid
+            && (String(o.diprosesOleh||'')==='mitra'
+              || ['mitra_kirim_sendiri','via_expedisi'].includes(String(o.metodePenyerahan||''))
+              || o.mitraKirimSendiri===true
+              || String(o.status||'')==='diantar_mitra');
+
+          const change=changeFor(item.id);
+          if(o.adminSaldoMasuk!==true && fee>0){
+            adminTambah+=fee;
+            adminCount++;
+            change.adminSaldoMasuk=true;
+            change.adminSaldoDiperbaikiAt=serverTimestamp();
+          }else if(o.adminSaldoMasuk===true){
+            alreadyCount++;
+          }
+
+          // COD kurir: potong talangan produk + fee admin. COD mitra sendiri: potong fee admin saja.
+          if(isCOD && o.kurirUid && o.kurirSaldoDipotong!==true){
+            const debit=isCODProduk?(mitraDapat+fee):fee;
+            if(debit>0) actions.push({uid:String(o.kurirUid),delta:-debit,orderId:item.id,flag:'kurirSaldoDipotong'});
+          }else if(isCOD && isMitraSelf && o.mitraSaldoDipotong!==true && fee>0){
+            actions.push({uid:mitraUid,delta:-fee,orderId:item.id,flag:'mitraSaldoDipotong'});
+          }
+
+          // Kredit mitra hanya untuk Non-COD; COD mitra sendiri sudah memegang cash.
+          if(mitraUid && o.mitraSaldoMasuk!==true){
+            if(!(isCOD && isMitraSelf)){
+              const credit=isMitraSelf?(mitraDapat+kurirDapat):mitraDapat;
+              if(credit>0) actions.push({uid:mitraUid,delta:credit,orderId:item.id,flag:'mitraSaldoMasuk'});
+            }
+          }
+
+          // Kurir Non-COD menerima 95% ongkir saat verifikasi.
+          if(!isCOD && o.kurirUid && o.kurirSaldoMasuk!==true && kurirDapat>0){
+            actions.push({uid:String(o.kurirUid),delta:kurirDapat,orderId:item.id,flag:'kurirSaldoMasuk'});
+          }
         }
-        const bagiKurirSnaps=[];
-        for(const pk of toBagiKurir){
-          const kref=doc(db,'users',pk.kurirUid);
-          const ksnap=await tx.get(kref);
-          bagiKurirSnaps.push({kref, ksnap, credit:pk.credit, orderId:pk.id});
+
+        // Baca semua akun penerima/pemotongan sebelum menulis apa pun.
+        const uniqueUids=[...new Set(actions.map(a=>a.uid).filter(Boolean))];
+        const userSnaps=new Map();
+        for(const uid of uniqueUids){
+          userSnaps.set(uid,await tx.get(doc(db,'users',uid)));
         }
-        // Baru tulis
-        if(tambah>0){
-          if(snap.exists()) tx.update(ref,{saldo:oldSaldo+tambah, totalPendapatanPesanan:oldPend+tambah, totalPendapatan:oldPend+tambah, updatedAt:serverTimestamp()});
-          else tx.set(ref,{saldo:tambah, totalPendapatanPesanan:tambah, totalPendapatan:tambah, totalDicairkan:0, createdAt:serverTimestamp(), updatedAt:serverTimestamp()});
-        } else if(!snap.exists()){
-          tx.set(ref,{saldo:0, totalPendapatanPesanan:0, totalPendapatan:0, totalDicairkan:0, createdAt:serverTimestamp(), updatedAt:serverTimestamp()});
+        const userDeltas=new Map();
+        const appliedActions=[];
+        for(const action of actions){
+          const snap=userSnaps.get(action.uid);
+          if(!snap?.exists()) continue;
+          userDeltas.set(action.uid,(userDeltas.get(action.uid)||0)+action.delta);
+          appliedActions.push(action);
         }
-        for(const {oref, osnap} of orderSnaps){ if(osnap.exists()) tx.update(oref,{adminSaldoMasuk:true, adminSaldoDiperbaikiAt:serverTimestamp()}); }
-        // V6: Potong saldo kurir 5% di sini, jangan double kalau sudah dipotong
-        for(const {uref, usnap, fee, orderId, isMitraSelf} of kurirSnaps){
-          if(!usnap.exists()) continue;
-          const ud=usnap.data()||{};
-          const cur=Number(ud.saldoEwallet ?? ud.saldoWallet ?? ud.saldo ?? 0);
-          const nw=Math.max(0, cur - fee);
-          tx.update(uref,{saldoEwallet:nw, saldoWallet:nw, saldo:nw, updatedAt:serverTimestamp()});
-          const oref2=doc(db,'orders',orderId);
-          if(isMitraSelf){ tx.update(oref2,{mitraSaldoDipotong:true, perluPotongKurir:false, updatedAt:serverTimestamp()}); } else { tx.update(oref2,{kurirSaldoDipotong:true, kurirTalangDipotong:true, perluPotongKurir:false, updatedAt:serverTimestamp()}); }
+        for(const [uid,delta] of userDeltas){
+          const snap=userSnaps.get(uid);
+          const data=snap.data()||{};
+          const current=Number(data.saldoEwallet??data.saldoWallet??data.saldo??0);
+          if(current+delta<0){
+            throw new Error('Saldo '+uid+' tidak cukup untuk pemotongan COD. Dibutuhkan '+money(-delta)+', saldo tersedia '+money(current)+'. Tidak ada saldo yang diubah.');
+          }
         }
-        for(const {mref, msnap, credit, orderId} of mitraSnaps){
-          if(!msnap.exists()) continue;
-          const md=msnap.data()||{};
-          const curM=Number(md.saldoEwallet ?? md.saldoWallet ?? md.saldo ?? 0);
-          const nwM=curM + credit;
-          tx.update(mref,{saldoEwallet:nwM, saldoWallet:nwM, saldo:nwM, updatedAt:serverTimestamp()});
-          const oref3=doc(db,'orders',orderId);
-          tx.update(oref3,{mitraSaldoMasuk:true, mitraDibagiAt:serverTimestamp(), updatedAt:serverTimestamp()});
+
+        // Baru menandai komponen yang akun tujuannya benar-benar tersedia.
+        for(const action of appliedActions){
+          const change=changeFor(action.orderId);
+          change[action.flag]=true;
+          if(action.flag==='kurirSaldoDipotong'){
+            change.kurirTalangDipotong=true;
+            change.perluPotongKurir=false;
+          }
+          if(action.flag==='mitraSaldoDipotong') change.perluPotongKurir=false;
+          if(action.flag==='mitraSaldoMasuk') change.mitraDibagiAt=serverTimestamp();
+          if(action.flag==='kurirSaldoMasuk') change.kurirDibagiAt=serverTimestamp();
         }
-        for(const {kref, ksnap, credit, orderId} of bagiKurirSnaps){
-          if(!ksnap.exists()) continue;
-          const kd=ksnap.data()||{};
-          const curK=Number(kd.saldoEwallet ?? kd.saldoWallet ?? kd.saldo ?? 0);
-          const nwK=curK + credit;
-          tx.update(kref,{saldoEwallet:nwK, saldoWallet:nwK, saldo:nwK, updatedAt:serverTimestamp()});
-          const orefK=doc(db,'orders',orderId);
-          tx.update(orefK,{kurirSaldoMasuk:true, kurirDibagiAt:serverTimestamp(), updatedAt:serverTimestamp()});
+
+        // Update saldo admin berdasarkan marker yang dibaca ulang dalam transaksi.
+        if(adminTambah>0){
+          const oldSaldo=Number(adminData.saldo||0);
+          const oldPend=Number(adminData.totalPendapatanPesanan??adminData.totalPendapatan??0);
+          if(adminSnap.exists()){
+            tx.update(adminRef,{
+              saldo:oldSaldo+adminTambah,
+              totalPendapatanPesanan:oldPend+adminTambah,
+              totalPendapatan:oldPend+adminTambah,
+              updatedAt:serverTimestamp()
+            });
+          }else{
+            tx.set(adminRef,{
+              saldo:adminTambah,totalPendapatanPesanan:adminTambah,totalPendapatan:adminTambah,
+              totalDicairkan:0,createdAt:serverTimestamp(),updatedAt:serverTimestamp()
+            });
+          }
         }
+        for(const [uid,delta] of userDeltas){
+          const snap=userSnaps.get(uid);
+          const data=snap.data()||{};
+          const current=Number(data.saldoEwallet??data.saldoWallet??data.saldo??0);
+          const next=current+delta;
+          tx.update(doc(db,'users',uid),{
+            saldoEwallet:next,saldoWallet:next,saldo:next,updatedAt:serverTimestamp()
+          });
+        }
+        for(const [id,changes] of orderChanges){
+          if(Object.keys(changes).length) tx.update(doc(db,'orders',id),{...changes,updatedAt:serverTimestamp()});
+        }
+        return {
+          adminTambah,adminCount,alreadyCount,
+          kurirPotong:appliedActions.filter(a=>a.flag==='kurirSaldoDipotong').length,
+          mitraPotong:appliedActions.filter(a=>a.flag==='mitraSaldoDipotong').length,
+          mitraBagi:appliedActions.filter(a=>a.flag==='mitraSaldoMasuk').length,
+          kurirBagi:appliedActions.filter(a=>a.flag==='kurirSaldoMasuk').length,
+          aksiTerlewat:actions.length-appliedActions.length
+        };
       });
-      msg('Perbaikan berhasil ✅ Admin +Rp '+tambah.toLocaleString('id-ID')+' dari '+hitung+' pesanan. Kurir dipotong '+toPotongKurir.length+' pesanan. Mitra dibagi '+toBagiMitra.length+' pesanan. Kurir dibagi '+toBagiKurir.length+' pesanan (transfer). '+skip+' pesanan sudah dihitung sebelumnya.', true);
+      if(result.adminTambah===0 && !result.kurirPotong && !result.mitraPotong && !result.mitraBagi && !result.kurirBagi){
+        msg('Tidak ada saldo yang perlu diperbaiki. Pesanan yang sudah diproses tidak dihitung ulang.',true);
+      }else{
+        msg('Perbaikan berhasil ✅ Admin +'+result.adminTambah.toLocaleString('id-ID')
+          +' dari '+result.adminCount+' pesanan. Potong saldo kurir '+result.kurirPotong
+          +' pesanan, potong mitra '+result.mitraPotong+' pesanan, bagi mitra '+result.mitraBagi
+          +' pesanan, bagi kurir '+result.kurirBagi+' pesanan.'
+          +(result.aksiTerlewat?' '+result.aksiTerlewat+' proses dilewati karena akun tidak ditemukan.':'')
+          +' '+result.alreadyCount+' pesanan sudah tercatat sebelumnya.',true);
+      }
     }catch(e){ msg('Gagal perbaiki: '+e.message); }
     btn.disabled=false; btn.textContent='🔧 Perbaiki Saldo Admin - + Selesaikan Titipan Kurir + Potong Kurir + Bagi Mitra';
   };
-  // Matikan jalur perbaikan saldo lama; semua settlement order hanya lewat approve-resi.
-  $('fixAdminSaldoBtn').onclick=()=>msg('Jalur settlement lama dinonaktifkan. Gunakan antrean Verifikasi Pesanan.');
-  $('fixAdminSaldoBtn').disabled=true;
 document.addEventListener('click',async e=>{
  const b=e.target.closest('[data-action]');if(!b)return;
  const action=b.dataset.action,col=b.dataset.col,id=b.dataset.id,uid=b.dataset.uid,amount=Number(b.dataset.amount||0);
@@ -597,19 +608,16 @@ document.addEventListener('click',async e=>{
       const od=osnap.data();
       const statusNow=String(od.status||'').toLowerCase();
       if(statusNow==='dibatalkan') throw new Error('Pesanan sudah dibatalkan');
-      if(['terverifikasi','selesai'].includes(statusNow)&&od.saldoDibagi===true)throw new Error('Pesanan sudah diverifikasi dan saldonya sudah diproses; refund dari alur ini ditolak.');
       if(od.refundMasuk===true) throw new Error('Refund sudah pernah masuk, tidak bisa double');
       const payRaw=String(od.metodePembayaran||od.paymentMethod||'').trim().toLowerCase();
       const _ojekStr=String((od.jenisLayanan||od.layanan||od.kategori||od.jenis||od.metodePengiriman||od.shippingMethod||'')+' '+(od.jenisKendaraan||'')).toLowerCase();
       const _isOjek=_ojekStr.includes('ojek');
-      const total=Number(od.danaTertahanNominal||od.total||0);
+      const total=Number(od.total||0);
       const pelangganUid=String(od.pelangganUid||od.customerUid||od.userUid||od.uid||od.pembeliUid||'');
-      const isCOD = payRaw==='cod' || payRaw.includes('cod') || payRaw.includes('bayar di tempat') || _isOjek;
-      const paidStatus=['lunas','lunas_saldo','terverifikasi','berhasil','paid'].includes(String(od.statusPembayaran||'').toLowerCase());
-      const danaBenarTertahan=od.danaTertahan===true||od.dibayarPakaiSaldo===true||paidStatus;
+      const isCOD = payRaw==='cod' || payRaw.includes('cod') || payRaw.includes('bayar di tempat') || _isOjek; // V13: Ojek selalu COD, jangan refund
       let refundNominal=0;
       let refundKe=null;
-      if(!isCOD && danaBenarTertahan && total>0 && pelangganUid){
+      if(!isCOD && total>0 && pelangganUid){
         refundNominal=total;
         const pref=doc(db,'users',pelangganUid);
         const psnap=await tx.get(pref);
@@ -617,93 +625,47 @@ document.addEventListener('click',async e=>{
         const pd=psnap.data();
         const curP=Number(pd.saldoEwallet ?? pd.saldoWallet ?? pd.saldo ?? 0);
         tx.update(pref,{saldoEwallet:curP+refundNominal, saldoWallet:curP+refundNominal, saldo:curP+refundNominal, updatedAt:serverTimestamp()});
-        const refundLedgerRef=doc(collection(db,'ewallet_transactions'));
-        tx.set(refundLedgerRef,{uid:pelangganUid,role:'pelanggan',type:'Refund Pembatalan Pesanan',direction:'credit',amount:refundNominal,balanceBefore:curP,balanceAfter:curP+refundNominal,orderId:id,nomorPesanan:od.nomorPesanan||id,status:'berhasil',createdAt:serverTimestamp(),note:'Pengembalian dana tertahan setelah pembatalan oleh admin.'});
         refundKe=pelangganUid;
       }
-      tx.update(oref,{status:'dibatalkan',statusSebelumnya:statusNow,dibatalkanOleh:'admin',dibatalkanAt:serverTimestamp(),refundMasuk:refundNominal>0,refundNominal,refundKePelangganUid:refundKe||null,refundAt:refundNominal>0?serverTimestamp():null,danaTertahanStatus:refundNominal>0?'dikembalikan':(isCOD?'tidak_berlaku':'tidak_ada_dana_tertahan'),danaTertahan:false,adminSaldoMasuk:false,mitraSaldoMasuk:false,kurirSaldoDipotong:false,updatedAt:serverTimestamp()});
+      tx.update(oref,{status:'dibatalkan', statusSebelumnya:statusNow, dibatalkanOleh:'admin', dibatalkanAt:serverTimestamp(), refundMasuk: refundNominal>0, refundNominal: refundNominal, refundKePelangganUid: refundKe||null, refundAt: refundNominal>0?serverTimestamp():null, adminSaldoMasuk:false, mitraSaldoMasuk:false, kurirSaldoDipotong:false, updatedAt:serverTimestamp()});
       // Simpan info untuk pesan
       tx._refundInfo={refundNominal, isCOD};
     });
-    msg(refundNominal>0?'Order dibatalkan dan dana tertahan dikembalikan ke saldo pelanggan.':'Order dibatalkan. Tidak ada refund karena COD atau pembayaran belum tertahan/terverifikasi.',true); await loadDitolakQueue(); await loadVerifikasiResi();
+    msg('Order dibatalkan + refund ke pelanggan ✅ (COD tidak di-refund, Transfer/QRIS di-refund full total).', true); await loadDitolakQueue(); await loadVerifikasiResi();
   }catch(x){ msg('Gagal batalkan: '+x.message); b.disabled=false; } return;
  }
  if(action==='approve-resi'){
-  const orderId=id;
-  if(!orderId){msg('ID pesanan tidak valid.');return;}
-  if(!confirm('Verifikasi pesanan ini? Semua saldo hanya diproses sekarang, satu kali, sesuai aturan COD/Non-COD.'))return;
+  const orderId=id, mitraUid=b.dataset.mitra||'', adminFee=Number(b.dataset.adminfee||0), mitraCredit=Number(b.dataset.mitrac||0);
+  if(!orderId || !mitraUid){ msg('Data resi tidak valid.'); return; }
+  if(!confirm('CEK RESI SUDAH BENAR? Setujui & bagi saldo: Mitra +'+money(mitraCredit)+' , Admin +'+money(adminFee)+'?')) return;
   b.disabled=true;
   try{
-   await runTransaction(db,async tx=>{
-    const oref=doc(db,'orders',orderId),osnap=await tx.get(oref);
-    if(!osnap.exists())throw new Error('Pesanan tidak ditemukan.');
-    const od=osnap.data();
-    if(!['selesai','menunggu_verifikasi_admin'].includes(String(od.status||'').toLowerCase()))throw new Error('Pesanan tidak lagi menunggu verifikasi.');
-    if(od.saldoDibagi===true||od.adminFeeDibayar===true||od.status==='terverifikasi')throw new Error('Saldo pesanan ini sudah diproses.');
-    const sp=hitungSettlementOrder(od);
-    if(!sp.isOjek){
-     const proof=[od.resiOcrText,od.buktiPenyerahanOcr,od.buktiSerahTerimaOcr,od.buktiResiOcr].some(v=>String(v||'').trim());
-     if(!proof)throw new Error('Bukti OCR pengantaran belum tersedia.');
-     if(!sp.mitraUid)throw new Error('UID mitra tidak ditemukan.');
-     if(!sp.isCOD && !(od.danaTertahan===true||od.dibayarPakaiSaldo===true||['lunas','lunas_saldo','terverifikasi','berhasil','paid'].includes(String(od.statusPembayaran||'').toLowerCase())))
-      throw new Error('Dana Non-COD belum tertahan/terverifikasi. Jangan membagikan saldo sebelum pembayaran sah.');
-    }
-    if(sp.isOjek&&!sp.kurirUid)throw new Error('UID kurir ojek tidak ditemukan.');
-    const mitraRef=sp.mitraUid?doc(db,'users',sp.mitraUid):null;
-    const kurirRef=sp.kurirUid?doc(db,'users',sp.kurirUid):null;
-    const adminRef=doc(db,'admin_saldo','total');
-    const mitraSnap=mitraRef?await tx.get(mitraRef):null;
-    const kurirSnap=kurirRef?await tx.get(kurirRef):null;
-    const adminSnap=await tx.get(adminRef);
-    if(mitraRef&&!mitraSnap?.exists())throw new Error('Profil mitra tidak ditemukan.');
-    if(kurirRef&&!kurirSnap?.exists())throw new Error('Profil kurir tidak ditemukan.');
-    const md=mitraSnap?.exists()?mitraSnap.data():{};
-    const kd=kurirSnap?.exists()?kurirSnap.data():{};
-    const ad=adminSnap.exists()?adminSnap.data():{};
-    const saldoM=Number(md.saldoEwallet??md.saldoWallet??md.saldo??0)||0;
-    const saldoK=Number(kd.saldoEwallet??kd.saldoWallet??kd.saldo??0)||0;
-    const saldoA=Number(ad.saldo||0),pendA=Number(ad.totalPendapatanPesanan??ad.totalPendapatan??0);
-    if(sp.mitraDebit>saldoM)throw new Error('Saldo mitra tidak cukup untuk fee COD. Butuh '+money(sp.mitraDebit)+', tersedia '+money(saldoM)+'.');
-    if(sp.kurirDebit>saldoK)throw new Error('Saldo kurir tidak cukup untuk talangan/fee. Butuh '+money(sp.kurirDebit)+', tersedia '+money(saldoK)+'.');
-    // Semua pembacaan selesai. Berikutnya tulis saldo, status, dan ledger dalam satu transaksi.
-    if(mitraRef && (sp.mitraCredit>0||sp.mitraDebit>0)){
-     const next=saldoM-sp.mitraDebit+sp.mitraCredit;
-     tx.set(mitraRef,{saldoEwallet:next,saldoWallet:next,saldo:next,updatedAt:serverTimestamp()},{merge:true});
-    }
-    if(kurirRef && (sp.kurirCredit>0||sp.kurirDebit>0)){
-     const next=saldoK-sp.kurirDebit+sp.kurirCredit;
-     tx.set(kurirRef,{saldoEwallet:next,saldoWallet:next,saldo:next,updatedAt:serverTimestamp()},{merge:true});
-    }
-    if(sp.adminCredit>0){
-     if(adminSnap.exists())tx.update(adminRef,{saldo:saldoA+sp.adminCredit,totalPendapatanPesanan:pendA+sp.adminCredit,totalPendapatan:pendA+sp.adminCredit,updatedAt:serverTimestamp()});
-     else tx.set(adminRef,{saldo:sp.adminCredit,totalPendapatanPesanan:sp.adminCredit,totalPendapatan:sp.adminCredit,totalDicairkan:0,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-    }
-    const ledger=(uid,role,direction,amount,before,after,type)=>{
-     if(!uid||!amount)return;
-     const lref=doc(collection(db,'ewallet_transactions'));
-     tx.set(lref,{uid,role,direction,amount,balanceBefore:before,balanceAfter:after,type,orderId,orderNumber:od.nomorPesanan||orderId,status:'berhasil',createdAt:serverTimestamp(),verifiedBy:user.uid,note:'Penyelesaian order '+(sp.isOjek?'ojek':(sp.isCOD?'COD':'Non-COD'))});
-    };
-    if(sp.mitraDebit)ledger(sp.mitraUid,'mitra','debit',sp.mitraDebit,saldoM,saldoM-sp.mitraDebit,'Fee COD');
-    if(sp.mitraCredit)ledger(sp.mitraUid,'mitra','credit',sp.mitraCredit,saldoM-sp.mitraDebit,saldoM-sp.mitraDebit+sp.mitraCredit,'Pendapatan order');
-    if(sp.kurirDebit)ledger(sp.kurirUid,'kurir','debit',sp.kurirDebit,saldoK,saldoK-sp.kurirDebit,sp.isOjek?'Fee ojek':'Talangan COD');
-    if(sp.kurirCredit)ledger(sp.kurirUid,'kurir','credit',sp.kurirCredit,saldoK-sp.kurirDebit,saldoK-sp.kurirDebit+sp.kurirCredit,'Pendapatan ongkir');
-    if(sp.adminCredit)ledger(user.uid,'admin','credit',sp.adminCredit,saldoA,saldoA+sp.adminCredit,'Fee admin order');
-    tx.update(oref,{
-     status:'terverifikasi',statusPesanan:'terverifikasi',statusPemenuhan:'terverifikasi',
-     saldoDibagi:true,verifikasiAdminStatus:'terverifikasi',diverifikasiAt:serverTimestamp(),
-     diverifikasiAdminUid:user.uid,adminFee:sp.adminCredit,adminFeeDibayar:true,
-     adminFeeDibayarAt:serverTimestamp(),adminSaldoMasuk:sp.adminCredit>0,
-     mitraSaldoMasuk:sp.mitraCredit>0,kurirSaldoMasuk:sp.kurirCredit>0,
-     mitraSaldoDibagi:sp.mitraCredit>0,kurirSaldoDibagi:sp.kurirCredit>0,
-     mitraSaldoDebit:sp.mitraDebit,kurirSaldoDebit:sp.kurirDebit,
-     danaTertahan:false,danaTertahanStatus:sp.isCOD?'tidak_berlaku':'dicairkan',
-     settlement:{jenis:sp.isOjek?'ojek':(sp.isCOD?'cod':'non_cod'),mitraCredit:sp.mitraCredit,kurirCredit:sp.kurirCredit,adminCredit:sp.adminCredit,mitraDebit:sp.mitraDebit,kurirDebit:sp.kurirDebit},
-     updatedAt:serverTimestamp()
+    await runTransaction(db, async tx=>{
+      const oref=doc(db,'orders',orderId);
+      const osnap=await tx.get(oref);
+      if(!osnap.exists()) throw new Error('Pesanan tidak ditemukan');
+      const od=osnap.data();
+      if(String(od.status||'').toLowerCase()!=='menunggu_verifikasi_admin') throw new Error('Pesanan tidak lagi menunggu verifikasi');
+      const mref=doc(db,'users',mitraUid);
+      const msnap=await tx.get(mref);
+      if(!msnap.exists()) throw new Error('Mitra tidak ditemukan');
+      const md=msnap.data();
+      const curM=Number(md.saldoEwallet ?? md.saldoWallet ?? md.saldo ?? 0);
+      const nwM=curM + mitraCredit;
+      const aref=doc(db,'admin_saldo','total');
+      const asnap=await tx.get(aref);
+      const ad=asnap.exists()?asnap.data():{};
+      const oldSaldo=Number(ad.saldo||0);
+      const oldPend=Number(ad.totalPendapatanPesanan??ad.totalPendapatan??0);
+      // Tulis semua
+      tx.update(oref,{status:'selesai', menungguApprovalAdmin:false, approvalAdminAt:serverTimestamp(), approvalAdminBy:user.uid, adminFee:adminFee, adminFeeDibayar:true, adminFeeDibayarAt:serverTimestamp(), adminSaldoMasuk:true, mitraSaldoMasuk:true, mitraDibagiAt:serverTimestamp(), adminSaldoDiperbaikiAt:serverTimestamp(), updatedAt:serverTimestamp()});
+      tx.update(mref,{saldoEwallet:nwM, saldoWallet:nwM, saldo:nwM, updatedAt:serverTimestamp()});
+      if(asnap.exists()) tx.update(aref,{saldo:oldSaldo+adminFee, totalPendapatanPesanan:oldPend+adminFee, totalPendapatan:oldPend+adminFee, updatedAt:serverTimestamp()});
+      else tx.set(aref,{saldo:adminFee, totalPendapatanPesanan:adminFee, totalPendapatan:adminFee, totalDicairkan:0, createdAt:serverTimestamp(), updatedAt:serverTimestamp()});
     });
-   });
-   msg('Pesanan terverifikasi. Saldo dan mutasi diproses satu kali sesuai aturan.',true);
-   await loadVerifikasiResi();await loadQueues();
-  }catch(x){msg('Gagal verifikasi: '+x.message);b.disabled=false;}
+    msg('Resi disetujui ✅ Mitra +'+money(mitraCredit)+', Admin +'+money(adminFee)+'.', true);
+    await loadVerifikasiResi(); await loadQueues();
+  }catch(x){ msg('Gagal setujui resi: '+x.message); b.disabled=false; }
   return;
  }
  if(action==='approve-withdraw'){
