@@ -161,17 +161,15 @@
 import {auth, db, app} from "./firebase-config.js";
 import {getStorage, ref as storageRef, uploadBytes, getDownloadURL} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-storage.js";
 import {onAuthStateChanged} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
-import {collection, query, where, onSnapshot, doc, getDoc, updateDoc, runTransaction, serverTimestamp} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+import {collection, query, where, onSnapshot, doc, getDoc, getDocs, updateDoc, runTransaction, serverTimestamp} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
 const storage=getStorage(app);
 
 const $=id=>document.getElementById(id);
 let currentUser=null, all=[], mitraCache={};
 
 function get(obj, paths, def=null){ for(let p of paths){ let v=obj; let ok=true; for(let k of p.split('.')){ if(v && k in v) v=v[k]; else {ok=false; break;} } if(ok && v!=='' && v!=null) return v; } return def; }
-function num(v){ if(v===null||v===undefined||v==='') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
-function escapeHtml(value){ return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
-function safeJsArg(value){ return encodeURIComponent(String(value??'')).replace(/[!'()*]/g,ch=>'%'+ch.charCodeAt(0).toString(16).toUpperCase()); }
-function distanceKm(a,b){ if(!Array.isArray(a)||!Array.isArray(b)||a.length<2||b.length<2||a.some(v=>v===null||v===undefined)||b.some(v=>v===null||v===undefined)) return null; const R=6371; const dLat=(b[0]-a[0])*Math.PI/180, dLng=(b[1]-a[1])*Math.PI/180; const aa=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(aa)); }
+function num(v){ const n=Number(v); return isNaN(n)||v===null?null:n; }
+function distanceKm(a,b){ if(!a||!b||!a[0]||!b[0]) return null; const R=6371; const dLat=(b[0]-a[0])*Math.PI/180, dLng=(b[1]-a[1])*Math.PI/180; const aa=Math.sin(dLat/2)**2+Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(aa)); }
 
 function parseSplit(o){
   // SINGLE SOURCE: nominal asli cuma di collection orders (dari checkout). Halaman ini JANGAN hitung ulang dari tempat lain.
@@ -199,8 +197,8 @@ async function fetchMitraGPS(mitraUid){
     const snap=await getDoc(doc(db,'users',mitraUid));
     if(snap.exists()){
       const d=snap.data();
-      const lat = num(d.lat) ?? num(d.lokasi?.lat) ?? num(d.currentLat) ?? num(d.latitude) ?? num(d.latMitra) ?? num(d.tokoLat);
-      const lng = num(d.lng) ?? num(d.lokasi?.lng) ?? num(d.currentLng) ?? num(d.longitude) ?? num(d.lngMitra) ?? num(d.tokoLng);
+      const lat = num(d.lat) || num(d.lokasi?.lat) || num(d.currentLat) || num(d.latitude) || num(d.latMitra) || num(d.tokoLat);
+      const lng = num(d.lng) || num(d.lokasi?.lng) || num(d.currentLng) || num(d.longitude) || num(d.lngMitra) || num(d.tokoLng);
       const alamat = d.alamat || d.alamatLengkap || d.alamatMitra || d.tokoAlamat || d.alamatToko || '-';
       const nama = d.nama || d.namaToko || d.tokoNama || d.displayName || 'Mitra';
       const data={lat, lng, alamat, nama, raw:d};
@@ -237,7 +235,8 @@ function courierDistance(o, profile){
   if(!c) return {toMitra:null,toCustomer:null,eligible:false};
   const toMitra=ml!==null&&mn!==null?distanceKm(c,[ml,mn]):null;
   const toCustomer=pl!==null&&pn!==null?distanceKm(c,[pl,pn]):null;
-  // Radius kelayakan selalu dihitung dari GPS mitra; GPS pelanggan hanya informasi rute.
+  // Radius utama dihitung ke lokasi penjemputan mitra; jika GPS mitra tidak ada,
+  // gunakan GPS pelanggan sebagai fallback.
   const basis=toMitra;
   return {toMitra,toCustomer,basis,eligible:basis!==null&&basis<=MAX_JARAK_KM};
 }
@@ -277,48 +276,73 @@ function render(){
 }
 
 function renderOrder(o, isAktif=false){
-  const mitraUid=get(o,['mitraUid','tokoId','ownerToko','sellerUid','mitraId']);
-  const mitraCacheData=mitraUid?mitraCache[mitraUid]:null;
-  let mitraLat=num(mitraCacheData?.lat),mitraLng=num(mitraCacheData?.lng);
-  let mitraAlamatReal=mitraCacheData?.alamat||'-',mitraNamaReal=mitraCacheData?.nama||'Mitra';
-  if(mitraLat===null)mitraLat=num(get(o,['mitraLat','tokoLat','pickupLat','alamatPickup.lat']));
-  if(mitraLng===null)mitraLng=num(get(o,['mitraLng','tokoLng','pickupLng','alamatPickup.lng']));
-  if(mitraAlamatReal==='-')mitraAlamatReal=get(o,['mitraAlamat','alamatMitra','alamatToko'],'-');
-  if(mitraNamaReal==='Mitra')mitraNamaReal=get(o,['mitraNama','tokoNama','namaMitra'],'Mitra');
+  const mitraUid = get(o, ['mitraUid','tokoId','ownerToko','sellerUid','mitraId']);
+  const mitraCacheData = mitraUid ? mitraCache[mitraUid] : null;
+  let mitraLat = num(mitraCacheData?.lat), mitraLng = num(mitraCacheData?.lng);
+  let mitraAlamatReal = mitraCacheData?.alamat || '-', mitraNamaReal = mitraCacheData?.nama || 'Mitra';
+  if(mitraLat===null) mitraLat=num(get(o,['mitraLat','tokoLat','pickupLat','alamatPickup.lat']));
+  if(mitraLng===null) mitraLng=num(get(o,['mitraLng','tokoLng','pickupLng','alamatPickup.lng']));
+  if(mitraAlamatReal==='-') mitraAlamatReal=get(o,['mitraAlamat','alamatMitra','alamatToko'],'-');
+  if(mitraNamaReal==='Mitra') mitraNamaReal=get(o,['mitraNama','tokoNama','namaMitra'],'Mitra');
+
   const pelNama=get(o,['alamatPengiriman.nama','namaPenerima','namaPelanggan','customerName'],'Pelanggan');
   const pelAlamat=get(o,['alamatPengiriman.alamat','alamatPengiriman.alamatLengkap','alamatLengkap','alamat'],'-');
   const pelWa=get(o,['alamatPengiriman.noWA','alamatPengiriman.telepon','noWA','telepon','whatsapp','nomorWA'],'-');
   const pelLat=num(get(o,['alamatPengiriman.lat','lokasi.lat','lat']));
   const pelLng=num(get(o,['alamatPengiriman.lng','lokasi.lng','lng']));
-  const gpsMitraOk=mitraLat!==null&&mitraLng!==null,gpsPelOk=pelLat!==null&&pelLng!==null;
+  const gpsMitraOk=mitraLat!==null&&mitraLng!==null;
+  const gpsPelOk=pelLat!==null&&pelLng!==null;
   const offer=getOfferCourier(o);
-  const distInfo=offer&&offer.profile.uid===currentUser?.uid?offer:courierDistance(o,(kurirProfiles.find(k=>k.uid===currentUser?.uid)||{}).data||{});
-  const jarakMitra=distInfo?.toMitra,jarakPelanggan=distInfo?.toCustomer;
+  const distInfo=offer && offer.profile.uid===currentUser?.uid ? offer : courierDistance(o, (kurirProfiles.find(k=>k.uid===currentUser?.uid)||{}).data||{});
+  const jarakMitra=distInfo?.toMitra;
+  const jarakPelanggan=distInfo?.toCustomer;
   const items=getItemList(o);
-  const jumlahBarang=items.length?items.reduce((a,it)=>a+(num(get(it,['jumlah','qty','quantity'],1))||1),0):0;
-  const orderLabel=escapeHtml(o.nomorPesanan||String(o.id||'').slice(0,8));
-  const products=`<div class="subaddr" style="font-size:12px;color:#222">📦 Paket #${orderLabel}${jumlahBarang?` - ${jumlahBarang} barang (isi disembunyikan)`:''}</div><div class="subaddr" style="font-size:11px;color:#666">Nama & harga produk disembunyikan untuk keamanan kurir.</div>`;
-  const split=parseSplit(o),phoneDigits=String(pelWa).replace(/\D/g,'');
-  const phoneLink=phoneDigits?`<a href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener noreferrer" style="color:#087443;font-weight:900">${escapeHtml(pelWa)}</a>`:escapeHtml(pelWa);
-  const idArg=safeJsArg(o.id);
+  // PRIVASI KURIR: nama + harga produk JANGAN ditampilkan ke kurir. Takut produk berharga, kurir punya pikiran jahat.
+  // Kurir cuma liat Nama Paket + jumlah barang, tanpa tau isinya apa. Di mitra gapapa tampil full karena produk dia sendiri.
+  const _jmlBarang = items.length ? items.reduce((a,it)=>a+(num(get(it,['jumlah','qty','quantity'],1))||1),0) : 0;
+  const products = `<div class="subaddr" style="font-size:12px;color:#222">📦 Paket #${o.nomorPesanan||String(o.id||'').slice(0,8)}${_jmlBarang?` - ${_jmlBarang} barang (isi disembunyikan)`:''}</div><div class="subaddr" style="font-size:11px;color:#666">Nama & harga produk disembunyikan untuk keamanan kurir.</div>`;
+  const split=parseSplit(o);
+  const phoneDigits=String(pelWa).replace(/\D/g,'');
+  const phoneLink=phoneDigits?`<a href="https://wa.me/${phoneDigits}" target="_blank" style="color:#087443;font-weight:900">${pelWa}</a>`:pelWa;
   const actionButtons=isAktif
-    ? `<button class="btn btn-green" onclick="selesai(decodeURIComponent('${idArg}'))">✅ Selesai</button><button class="btn btn-dark" onclick="lacak(decodeURIComponent('${idArg}'))">📍 Lacak GPS</button>`
-    : `<div class="row2"><button class="btn btn-green" onclick="ambil(decodeURIComponent('${idArg}'))">✅ Diambil</button><button class="btn btn-dark" onclick="tolak(decodeURIComponent('${idArg}'))">✖ Ditolak</button></div>`;
-  return `<div class="order ${isAktif?'aktif':''}">
-    <div class="no"><span>#${orderLabel}</span><span class="badge">${escapeHtml(o.status||'menunggu_kurir')}</span></div>
-    <div class="section pick"><div class="label">📍 LOKASI MITRA / PENGAMBILAN</div><div class="addr">🏪 ${escapeHtml(mitraNamaReal)}</div><div class="subaddr">${escapeHtml(mitraAlamatReal)}</div>
-      <div class="gps ${gpsMitraOk?'ok':'warn'}"><span>${gpsMitraOk?mitraLat.toFixed(6)+', '+mitraLng.toFixed(6):'GPS mitra belum tersedia'}</span>${gpsMitraOk?`<a href="https://www.google.com/maps/search/${mitraLat},${mitraLng}" target="_blank" rel="noopener noreferrer">MAPS</a>`:''}</div></div>
-    <div class="section drop"><div class="label">🏠 DATA PELANGGAN / TUJUAN</div><div class="addr">👤 ${escapeHtml(pelNama)}</div><div class="subaddr">Alamat: ${escapeHtml(pelAlamat)}</div><div class="subaddr">WhatsApp: ${phoneLink}</div>
-      <div class="gps ${gpsPelOk?'ok':'warn'}"><span>${gpsPelOk?pelLat.toFixed(6)+', '+pelLng.toFixed(6):'GPS pelanggan belum tersedia'}</span>${gpsPelOk?`<a href="https://www.google.com/maps/search/${pelLat},${pelLng}" target="_blank" rel="noopener noreferrer">MAPS</a>`:''}</div></div>
-    <div class="section"><div class="label">📦 PAKET YANG HARUS DIANTAR</div>${products}</div>
-    <div class="section ongkir"><div class="label" style="color:#00ff88">JARAK KURIR & BATAS LEMPARAN</div><div class="row2">
-      <div class="box dark"><span>Kurir → Mitra</span><b style="color:#00ff88">${jarakMitra!==null&&jarakMitra!==undefined?jarakMitra.toFixed(2)+' km':'-'}</b></div>
-      <div class="box dark"><span>Kurir → Pelanggan</span><b style="color:var(--y)">${jarakPelanggan!==null&&jarakPelanggan!==undefined?jarakPelanggan.toFixed(2)+' km':'-'}</b></div></div>
+    ? `<button class="btn btn-green" onclick="selesai('${o.id}')">✅ Selesai</button><button class="btn btn-dark" onclick="lacak('${o.id}')">📍 Lacak GPS</button>`
+    : `<div class="row2"><button class="btn btn-green" onclick="ambil('${o.id}')">✅ Diambil</button><button class="btn btn-dark" onclick="tolak('${o.id}')">✖ Ditolak</button></div>`;
+
+  return `
+  <div class="order ${isAktif?'aktif':''}">
+    <div class="no"><span>#${o.nomorPesanan||o.id.slice(0,8)}</span><span class="badge">${o.status||'menunggu_kurir'}</span></div>
+    <div class="section pick">
+      <div class="label">📍 LOKASI MITRA / PENGAMBILAN</div>
+      <div class="addr">🏪 ${mitraNamaReal}</div><div class="subaddr">${mitraAlamatReal}</div>
+      <div class="gps ${gpsMitraOk?'ok':'warn'}"><span>${gpsMitraOk?mitraLat.toFixed(6)+', '+mitraLng.toFixed(6):'GPS mitra belum tersedia'}</span>
+      ${gpsMitraOk?`<a href="https://www.google.com/maps/search/${mitraLat},${mitraLng}" target="_blank">MAPS</a>`:''}</div>
+    </div>
+    <div class="section drop">
+      <div class="label">🏠 DATA PELANGGAN / TUJUAN</div>
+      <div class="addr">👤 ${pelNama}</div>
+      <div class="subaddr">Alamat: ${pelAlamat}</div>
+      <div class="subaddr">WhatsApp: ${phoneLink}</div>
+      <div class="gps ${gpsPelOk?'ok':'warn'}"><span>${gpsPelOk?pelLat.toFixed(6)+', '+pelLng.toFixed(6):'GPS pelanggan belum tersedia'}</span>
+      ${gpsPelOk?`<a href="https://www.google.com/maps/search/${pelLat},${pelLng}" target="_blank">MAPS</a>`:''}</div>
+    </div>
+    <div class="section">
+      <div class="label">📦 PAKET YANG HARUS DIANTAR</div>${products}
+    </div>
+    <div class="section ongkir">
+      <div class="label" style="color:#00ff88">JARAK KURIR & BATAS LEMPARAN</div>
+      <div class="row2">
+        <div class="box dark"><span>Kurir → Mitra</span><b style="color:#00ff88">${jarakMitra!==null&&jarakMitra!==undefined?jarakMitra.toFixed(2)+' km':'-'}</b></div>
+        <div class="box dark"><span>Kurir → Pelanggan</span><b style="color:var(--y)">${jarakPelanggan!==null&&jarakPelanggan!==undefined?jarakPelanggan.toFixed(2)+' km':'-'}</b></div>
+      </div>
       <div class="subaddr" style="color:#fff;margin-top:7px">Semua kurir dengan GPS maksimal ${MAX_JARAK_KM} km dari mitra berhak melihat dan berebut pesanan. Kurir di luar radius tidak ditampilkan.</div>
       <div class="box dark" style="margin-top:8px"><span>Ongkir untuk kurir (95%)</span><b style="color:var(--y)">Rp ${Number(split.ongkirKurir||0).toLocaleString('id-ID')}</b></div>
       ${split.isCOD?`<div class="box dark" style="margin-top:8px"><span>Tagihan ke pelanggan (COD)</span><b style="color:#fff">Rp ${Number(split.tagihanCOD||0).toLocaleString('id-ID')}</b><div class="subaddr" style="color:#ccc;font-size:11px">Tagih total ini ke pelanggan. Nama & harga produk tidak ditampilkan.</div></div>`:''}
-      ${gpsMitraOk&&gpsPelOk?`<a href="https://www.google.com/maps/dir/${mitraLat},${mitraLng}/${pelLat},${pelLng}" target="_blank" rel="noopener noreferrer" class="btn btn-y">🗺️ Rute Mitra ke Pelanggan</a>`:''}</div>${actionButtons}</div>`;
+      ${gpsMitraOk&&gpsPelOk?`<a href="https://www.google.com/maps/dir/${mitraLat},${mitraLng}/${pelLat},${pelLng}" target="_blank" class="btn btn-y">🗺️ Rute Mitra ke Pelanggan</a>`:''}
+    </div>
+    ${actionButtons}
+  </div>`;
 }
+
 window.tolak=async(id)=>{
   if(!confirm('Tolak tawaran pesanan ini? Status pesanan tetap MENUNGGU KURIR dan akan ditawarkan ke kurir berikutnya.')) return;
   try{
@@ -364,14 +388,6 @@ window.ambil=async(id)=>{
       if(!snap.exists()) throw Error('Pesanan tidak ditemukan.');
       const order={id,...snap.data()};
       if(String(order.status||'').toLowerCase()!=='menunggu_kurir') throw Error('Pesanan sudah diambil kurir lain atau tidak tersedia.');
-      const _splitFresh=parseSplit(order);
-      if(_splitFresh.isCOD){
-        const _courierRef=doc(db,'users',currentUser.uid);
-        const _courierSnap=await tx.get(_courierRef);
-        if(!_courierSnap.exists())throw Error('Profil kurir tidak ditemukan.');
-        const _wallet=Number(_courierSnap.data().saldoEwallet??_courierSnap.data().saldoWallet??_courierSnap.data().saldo??0)||0;
-        if(_wallet<_splitFresh.potongKurirCOD)throw Error('Saldo COD tidak lagi cukup. Butuh '+rupiah(_splitFresh.potongKurirCOD)+', saldo tersedia '+rupiah(_wallet)+'.');
-      }
       const offer=getOfferCourier(order);
       const profile=kurirProfiles.find(k=>String(k.uid)===String(currentUser.uid));
       const distance=profile?courierDistance(order,profile.data||{}):null;
@@ -468,23 +484,39 @@ window.kirimBukti=async()=>{
   const id=proofOrderId, btn=$('proofSubmit');
   btn.disabled=true; btn.textContent='Menyimpan OCR...'; $('proofStatus').textContent='Menyimpan teks OCR saja. Foto tidak diunggah.';
   try{
-    const orderRef=doc(db,'orders',id);
-    await runTransaction(db,async tx=>{
-      const snap=await tx.get(orderRef);
-      if(!snap.exists())throw new Error('Pesanan tidak ditemukan.');
-      const o=snap.data();
-      if(o.kurirUid!==currentUser.uid)throw new Error('Pesanan ini bukan tugas kurir yang sedang login.');
-      if(!['diantar','dikirim','dalam_pengiriman'].includes(String(o.status||'').toLowerCase()))throw new Error('Status pesanan tidak lagi dalam proses pengantaran.');
-      if(o.buktiSerahTerimaOcrStatus==='selesai'||o.saldoDibagi===true)throw new Error('Bukti pesanan ini sudah dikirim atau pesanan sudah diproses admin.');
-      tx.update(orderRef,{status:'selesai',statusPemenuhan:'selesai',verifikasiAdminStatus:'menunggu',saldoDibagi:false,buktiPenyerahanOcr:proofOcrText,buktiSerahTerimaOcr:proofOcrText,buktiResiOcr:proofOcrText,buktiSerahTerimaOcrStatus:'selesai',buktiSerahTerimaOleh:currentUser.uid,buktiSerahTerimaAt:serverTimestamp(),dikirimSelesaiAt:serverTimestamp(),updatedAt:serverTimestamp()});
+    const snap=await getDoc(doc(db,'orders',id));
+    if(!snap.exists()) throw new Error('Pesanan tidak ditemukan.');
+    const o=snap.data();
+    if(o.kurirUid!==currentUser.uid) throw new Error('Pesanan ini bukan tugas kurir yang sedang login.');
+    if(!['diantar','dikirim','dalam_pengiriman'].includes(String(o.status||'').toLowerCase())) throw new Error('Status pesanan tidak lagi dalam proses pengantaran.');
+    const orderStatus=String(o.status||'').toLowerCase();
+    const proofAlreadySubmitted=!!o.buktiSerahTerimaUrl
+      && ['menunggu_verifikasi_admin','menunggu_verifikasi','terverifikasi','selesai'].includes(orderStatus);
+    if(proofAlreadySubmitted || o.saldoDibagi===true) throw new Error('Bukti pesanan ini sudah dikirim atau pesanan sudah diproses admin.');
+    // Jangan memakai statusPembayaran sebagai pengunci bukti:
+    // status pembayaran dapat berbeda dari status pengantaran/verifikasi bukti.
+    await updateDoc(doc(db,'orders',id),{
+      status:'menunggu_verifikasi_admin',
+      statusPemenuhan:'selesai',
+      statusPembayaran:'menunggu_verifikasi_admin',
+      verifikasiAdminStatus:'menunggu',
+      saldoDibagi:false,
+      statusPembayaranAt:serverTimestamp(),
+      buktiPenyerahanOcr:proofOcrText,
+      buktiSerahTerimaOcr:proofOcrText,
+      buktiResiOcr:proofOcrText,
+      buktiSerahTerimaOcrStatus:'selesai',
+      buktiSerahTerimaOleh:currentUser.uid,
+      buktiSerahTerimaAt:serverTimestamp(),
+      dikirimSelesaiAt:serverTimestamp()
     });
-    alert('Teks OCR berhasil disimpan. Status pesanan SELESAI dan menunggu verifikasi admin. Status pembayaran tidak diubah.');
+    alert('Teks OCR berhasil disimpan. Foto tidak diunggah. Status pesanan MENUNGGU VERIFIKASI ADMIN.');
     window.tutupBukti();
   }catch(e){console.error(e);$('proofStatus').textContent='Gagal: '+e.message;alert('Gagal mengirim bukti: '+e.message);}
   finally{btn.disabled=!proofOcrText.trim();btn.textContent='Simpan OCR & Ajukan Verifikasi';}
 };
 
-window.lacak=(id)=>{ localStorage.setItem('last_order_id',id); location.href='./perjalanan-kuri.html?orderId='+encodeURIComponent(id); };
+window.lacak=(id)=>{ localStorage.setItem('last_order_id',id); location.href='./perjalanan-kurir.html?orderId='+id; };
 
 onAuthStateChanged(auth, async (u)=>{
   if(!u){ currentUser=null; return; }
@@ -499,10 +531,13 @@ onAuthStateChanged(auth, async (u)=>{
       return;
     }
     $('nama').textContent=profile.nama||u.email;
-    $('mySaldo').textContent='Rp '+Number(profile.saldoEwallet??profile.saldoWallet??profile.saldo??0).toLocaleString('id-ID');
+    $('mySaldo').textContent='Rp '+Number(profile.saldo||0).toLocaleString('id-ID');
   }catch(e){ console.error(e); currentUser=null; alert('Gagal memvalidasi akun kurir: '+e.message); return; }
-  // Hanya data GPS akun kurir yang sedang login yang diperlukan di halaman ini.
-  kurirProfiles=[{uid:u.uid,data:profile}];
+  try{
+    const usSnap=await getDocs(collection(db,'users'));
+    kurirProfiles=usSnap.docs.map(d=>({uid:d.id,data:d.data()}))
+      .filter(k=>['kurir','mitra_pengantaran'].includes(String(k.data.role||'').toLowerCase()));
+  }catch(e){ console.error('Gagal memuat daftar kurir',e); }
   const col=collection(db,'orders');
   // Listener terpisah agar query cocok dengan Firestore Rules:
   // pesanan menunggu kurir, dan pesanan yang sudah ditugaskan ke UID ini.
@@ -523,7 +558,7 @@ onAuthStateChanged(auth, async (u)=>{
   onSnapshot(query(col, where('kurirUid','==',u.uid)),
     snap=>mergeOrders(snap.docs),
     err=>{console.error('Gagal membaca pesanan aktif kurir:',err); $('emptyAktif').textContent='Gagal membaca pesanan aktif. Periksa Firebase Rules.';});
-  onSnapshot(doc(db,'users',u.uid), s=>{ if(s.exists()){ const latest=s.data(); $('mySaldo').textContent='Rp '+Number(latest.saldoEwallet??latest.saldoWallet??latest.saldo??0).toLocaleString('id-ID'); kurirProfiles=[{uid:u.uid,data:latest}]; enrichOrders().catch(e=>console.error('Gagal memperbarui GPS kurir',e)); } });
+  onSnapshot(doc(db,'users',u.uid), s=>{ if(s.exists()) $('mySaldo').textContent='Rp '+Number(s.data().saldo||0).toLocaleString('id-ID'); });
 });
 </script>
 <script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script><script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
