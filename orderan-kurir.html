@@ -403,15 +403,16 @@ async function prosesSelesaikanOrder(id){
   if(!orderSnap.exists())throw new Error("Order tidak ditemukan.");
   const o=orderSnap.data();
   if(String(o.kurirUid||"")!==uid)throw new Error("Order bukan milik akun kurir ini.");
-  if(o.status==="menunggu_verifikasi_admin"||o.status==="terverifikasi"||o.adminFeeDibayar===true||o.kurirSaldoDipotong===true)
+  if(o.status==="menunggu_verifikasi_admin"||o.status==="terverifikasi"||o.status==="selesai"||o.adminFeeDibayar===true||o.kurirSaldoDipotong===true)
     throw new Error("Order sudah diajukan atau diverifikasi.");
   if(!["sedang_mengantar","diterima_kurir"].includes(o.status))throw new Error("Status order tidak valid.");
   const total=ambilOngkir(o);
   if(total<=0)throw new Error("Nominal ongkir tidak valid.");
   const fee=Math.ceil(total*0.05);
   tx.update(orderRef,{
-   jenisOrder:"ojek", status:"selesai", statusPemenuhan:"selesai",
+   jenisOrder:"ojek", status:"menunggu_verifikasi_admin", statusPemenuhan:"selesai",
    selesaiAt:serverTimestamp(), selesaiOlehUid:uid, verifikasiAdminStatus:"menunggu",
+   saldoDibagi:false,
    adminFee:fee, adminFeeDibayar:false, adminSaldoMasuk:false,
    kurirTalang:0, kurirTalangDipotong:false, kurirPotongTotal:fee,
    kurirSaldoDipotong:false, kurirTerima:total-fee, updatedAt:serverTimestamp()
