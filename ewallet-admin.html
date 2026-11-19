@@ -105,11 +105,12 @@ main{max-width:820px;margin:-10px auto 0;padding:0 10px 80px;position:relative;z
 <div class="wallet-stat" style="background:#eef6ff;border-color:#c8dcff"><div class="label">Kurir Dapat (95% Ongkir - Bukan Uang Admin)</div><div class="value" id="ongkirKurir">Memuat...</div><small style="font-size:10px;color:#666">Diteruskan ke kurir, bukan laba admin</small></div>
 </div>
 <!-- Rincian contoh sudah pindah ke panel Info di atas (mode bersih) --><div id="actionMsg"></div>
+<button type="button" class="btn btn-black" style="width:100%;margin-top:8px" onclick="document.getElementById('panel-verifikasi').scrollIntoView({behavior:'smooth',block:'start'})">🧾 Buka Verifikasi Pesanan</button>
 <button id="fixAdminSaldoBtn" class="btn btn-yellow" style="width:100%;margin-top:8px;padding:10px;font-weight:800">🔧 Perbaiki Saldo Admin - + Selesaikan Titipan Kurir</button>
 <div id="fixAdminSaldoInfo" class="info-pendek"></div>
 </div>
 
-<div class="panel panel-toggle" id="panel-verifikasi"><h2 style="margin:0 0 6px;font-size:14px;font-weight:800">🧾 Verifikasi Resi Mitra</h2><div style="font-size:11px;color:#666;margin-bottom:10px">Mitra kirim resi -> admin cek resi di sini -> klik Setujui & Bagi Saldo, baru saldo mitra + admin 5% dibagi. Jangan pakai Perbaiki untuk yang belum disetujui.</div><div id="verifikasiResiQueue" class="list">Memuat data...</div></div>
+<div class="panel" id="panel-verifikasi"><h2 style="margin:0 0 6px;font-size:14px;font-weight:800">🧾 Verifikasi Resi Mitra</h2><div style="font-size:11px;color:#666;margin-bottom:10px">Pesanan yang sudah ditandai selesai oleh mitra/kurir muncul di sini. Admin periksa bukti, lalu klik Verifikasi & Bagi Saldo. Saldo hanya berubah saat verifikasi admin.</div><div id="verifikasiResiQueue" class="list">Memuat data...</div></div>
 <div class="panel panel-toggle" id="panel-ditolak"><h2 style="margin:0 0 6px;font-size:14px;font-weight:800">❌ Ditolak - Tindakan Admin</h2><div style="font-size:11px;color:#666;margin-bottom:10px">Mitra tolak = cari mitra lain (belum refund, order masih jalan). Kurir tolak = balik ke mitra proses sendiri (belum refund). Refund ke e-wallet pelanggan HANYA kalau admin klik Batalkan Total di bawah. Ojek / COD tidak di-refund.</div><div id="ditolakQueue" class="list">Memuat data...</div></div>
 <div class="panel panel-toggle" id="panel-nilai"><h2 style="margin:0 0 6px;font-size:14px;font-weight:800">⭐ Nilai Kurir</h2><div style="font-size:11px;color:#666;margin-bottom:10px">Awal 100. Tolak -10, Batal -5, Selesai +2. Di bawah 70 = peringatan, di bawah 50 = suspend / jangan dikasih order dulu.</div><div id="nilaiKurirQueue" class="list">Memuat nilai kurir...</div></div>
 <div class="panel panel-toggle" id="panel-semua-ditolak"><h2 style="margin:0 0 6px;font-size:14px;font-weight:800">📦 Semua Ditolak - Admin Wajib Tau</h2><div style="font-size:11px;color:#666;margin-bottom:10px">Semua yang ditolak mitra / kurir / ojek masuk sini. Admin yang approve pending, bukan mitra/kurir. Klik detail untuk lihat produknya.</div><div id="semuaDitolakQueue" class="list">Memuat...</div></div>
@@ -342,7 +343,7 @@ onAuthStateChanged(auth,async u=>{
  if(!u){$('welcomeTop').innerHTML='Halo, Kak, <b>Admin</b>';$('logoutBtn').textContent='Login';$('logoutBtn').onclick=()=>location.href='./profil.html';$('balance').textContent=money(0);$('income').textContent=money(0);$('withdrawn').textContent=money(0);$('topupQueue').textContent='Login untuk melihat antrean';$('withdrawQueue').textContent='Login untuk melihat antrean';return}
  $('logoutBtn').textContent='Keluar';$('logoutBtn').onclick=async()=>{try{await signOut(auth)}catch(e){}location.href='./profil.html'};
  try{const p=await getProfileAny(u);const nama=p?.nama||p?.namaUsaha||u.email||'Admin';$('welcomeTop').innerHTML='Halo, Kak, <b>'+esc(nama)+'</b>'}catch(e){$('welcomeTop').innerHTML='Halo, Kak, <b>'+esc(u.email||'Admin')+'</b>'}
- await Promise.all([loadAdminWallet(),loadQueues()]);
+ await Promise.all([loadAdminWallet(),loadQueues(),loadVerifikasiResi()]);
 });
 
 /* Saat kembali dari halaman lain, perbarui data tanpa reload paksa. */
