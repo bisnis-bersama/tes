@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="id"><head><style>
+@font-face {
+  font-family: "Optimistic";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Optimistic Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
+}
+:where(html) {
+  font-family: "Optimistic", system-ui, sans-serif;
+}
+:where(code, pre, kbd, samp) {
+  font-family: "Optimistic Mono", ui-monospace, monospace;
+}
+</style><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>V2 BARU - Pesanan Saya - Pending & Dikemas di Atas + Beli Lagi</title><style>
+:root{--y:#ffcc00;--bg:#f1f2f4;--line:#e2e8e4}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#171717;font:13px/1.45 system-ui,sans-serif}
+.top{background:#111;color:#fff;padding:14px 16px 28px;border-radius:0 0 26px 26px;display:flex;align-items:center;gap:12px}.logo-box{width:44px;height:44px;background:#fff;border-radius:12px;overflow:hidden;flex:0 0 44px;display:grid;place-items:center}.logo-box img{width:100%;height:100%;object-fit:contain}.brand{font-weight:900;font-size:16px;color:var(--y)}.sub{font-size:11px;color:#c7cbd0}
+main{max-width:720px;margin:-18px auto 0;padding:0 12px 30px}.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin-bottom:10px}
+.order-card{background:#fff;border:1px solid #e6e8e8;border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 2px 12px #00000006}.order-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.no{font-weight:900;font-size:13px}.badge{font-size:10px;font-weight:800;padding:4px 10px;border-radius:999px;background:#e6f7ef;color:#087443;border:1px solid #c3ead7}.badge-pending{background:#fff3cd;color:#7a5b00;border-color:#ffe69c}.badge-dikemas{background:#e0f2ff;color:#0b5cad;border-color:#b6dcff}.badge-selesai{background:#e6f7ef;color:#087443;border-color:#c3ead7}
+.row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;border-bottom:1px dashed #eee}.row:last-child{border:0}.empty{text-align:center;padding:30px 20px;color:#888}
+.btn{border:0;border-radius:10px;background:#111;color:#ffcc00;padding:11px 14px;font-weight:800;width:100%;text-align:center;text-decoration:none;display:block;cursor:pointer}.btn-yellow{background:var(--y);color:#111}.btn-outline{background:#fff;color:#111;border:1.5px solid #111}.section-title{font-weight:900;font-size:14px;margin:14px 2px 8px}.muted{color:#666;font-size:11px}
+</style></head><body>
+<header class="top"><div class="logo-box"><span style="font-size:22px">🛒</span></div><div><div class="brand">TOKO SIAP ANTAR</div><div class="sub">Pesanan Saya - Pending & Dikemas di atas, Selesai bisa Beli Lagi</div></div></header>
+<main>
+<div class="panel" style="display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:13px">Pesanan milikmu</b><br><span style="font-size:11px;color:#666">Akun <span id="uEmail" style="font-weight:700;color:#111">...</span></span></div><span class="badge" id="count">0 aktif</span></div>
+<div class="section-title">⏳ Pending & Dikemas - Di Atas</div><div id="listAktif"></div><div id="emptyAktif" class="empty" style="display:none"><b>Tidak ada pesanan pending / dikemas</b><br><span style="font-size:12px">Semua pesanan aktif sudah selesai / diantar.</span></div>
+<div class="section-title">✅ Pesanan Selesai - Bisa Beli Lagi</div><div id="listSelesai"></div><div id="emptySelesai" class="empty" style="display:none"><b>Belum ada pesanan selesai</b><br><span style="font-size:12px">Selesaikan 1 pesanan dulu, tombol Beli Lagi akan muncul di sini.</span></div>
+</main>
+<script type="module">
+import {auth, db} from "./firebase-config.js";
+import {onAuthStateChanged} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import {collection, query, where, onSnapshot, doc, getDoc, getDocs, runTransaction, serverTimestamp} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+const $=id=>document.getElementById(id);
+function rp(n){return 'Rp '+Number(n||0).toLocaleString('id-ID');}
+function fmt(ts){try{const d=ts?.toDate?ts.toDate():new Date(ts);return d.toLocaleString('id-ID',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return '-';}}
+function esc(s){return String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function statusOf(o){return String(o.status||o.statusPesanan||o.statusPemenuhan||'').toLowerCase();}
+function isSelesai(s){return s==='terverifikasi'||s.includes('complete')||s.includes('sudah_diterima');}
+function isBatal(s){return s.includes('batal')||s.includes('cancel')||s.includes('ditolak');}
+// Prioritas: 0=pending, 1=dikemas, 2=lainnya aktif
+function prioritas(o){
+  const s=statusOf(o);
+  if(s.includes('pending')||s.includes('menunggu')||s.includes('mencari_kurir')||s.includes('menunggu_harga')||s.includes('menunggu_kurir')||s.includes('belum')) return 0;
+  if(s.includes('dikemas')||s.includes('disetujui')||s.includes('diproses')||s.includes('siap')) return 1;
+  if(s.includes('mengantar')||s.includes('diterima_kurir')||s.includes('diantar')||s.includes('dalam_perjalanan')) return 2;
+  return 3;
+}
+function badgeClass(o){
+  const s=statusOf(o);
+  if(isSelesai(s)) return 'badge badge-selesai';
+  if(s==='selesai'||s==='menunggu_verifikasi_admin') return 'badge badge-pending';
+  if(s.includes('dikemas')||s.includes('disetujui')) return 'badge badge-dikemas';
+  return 'badge badge-pending';
+}
+function labelStatus(o){
+  const s=statusOf(o);
+  if(s==='terverifikasi') return 'Terverifikasi';
+  if(s==='selesai'||s==='menunggu_verifikasi_admin') return 'Selesai - Menunggu Verifikasi Admin';
+  if(s.includes('dikemas')) return 'Dikemas';
+  if(s.includes('menunggu_harga')) return 'Pending - Menunggu Harga Mitra';
+  if(s.includes('mencari_kurir')||s.includes('menunggu_kurir')) return 'Pending - Mencari Kurir';
+  if(s.includes('pending')||s.includes('menunggu')) return 'Pending';
+  if(s.includes('disetujui')) return 'Disetujui - Dikemas';
+  if(s.includes('mengantar')||s.includes('diterima_kurir')) return 'Sedang Diantar';
+  return o.status||'Proses';
+}
+function itemsText(o){
+  const items=o.items||o.produk||o.cart||o.detail||[];
+  if(Array.isArray(items)&&items.length) return items.map(it=>{const n=it.nama||it.namaProduk||it.name||it.produk||'Produk'; const q=it.qty||it.jumlah||it.quantity||1; return esc(n)+' x'+q;}).join('<br>');
+  if(o.namaProduk) return esc(o.namaProduk)+' x'+(o.qty||o.jumlah||1);
+  return '<span class="muted">Detail produk ada di pesanan</span>';
+}
+function canConfirm(o){const s=statusOf(o);return s==='terverifikasi' && !o.pelangganKonfirmasiDiterimaAt;}
+let currentUser=null;
+async function confirmReceived(id,button){
+ if(!currentUser||!confirm('Konfirmasi bahwa pesanan yang sudah diverifikasi admin telah diterima?'))return;
+ button.disabled=true;button.textContent='Menyimpan…';
+ try{
+  const orderRef=doc(db,'orders',id);
+  await runTransaction(db,async tx=>{
+   const snap=await tx.get(orderRef);if(!snap.exists())throw Error('Pesanan tidak ditemukan.');
+   const o=snap.data(),owner=o.ownerUid||o.userId||o.uid;
+   if(owner!==currentUser.uid&&o.email!==currentUser.email)throw Error('Akses pesanan ditolak.');
+   if(String(o.status||'').toLowerCase()!=='terverifikasi')throw Error('Pesanan harus diverifikasi admin terlebih dahulu.');
+   if(o.pelangganKonfirmasiDiterimaAt)throw Error('Pesanan sudah pernah dikonfirmasi.');
+   tx.update(orderRef,{pelangganKonfirmasiDiterimaAt:serverTimestamp(),pelangganKonfirmasiUid:currentUser.uid,updatedAt:serverTimestamp()});
+  });
+  alert('Terima kasih! Konfirmasi penerimaan tersimpan. Tidak ada perubahan saldo.');
+ }catch(e){alert('Gagal: '+e.message);button.disabled=false;button.textContent='Konfirmasi Diterima';}
+}
+// Beli Lagi: simpan items pesanan selesai ke localStorage, arahkan ke index untuk checkout ulang
+function beliLagi(id){
+  const o=(window._all||[]).find(x=>x.id===id);
+  if(!o){alert('Pesanan tidak ditemukan.');return;}
+  const items=o.items||o.produk||o.cart||[];
+  const payload={fromOrderId:id, nomorPesanan:o.nomorPesanan||id, mitraUid:o.mitraUsahaUid||o.mitraUid||'', items: Array.isArray(items)&&items.length?items:[{nama:o.namaProduk||'Produk pesanan sebelumnya', qty:o.qty||o.jumlah||1, harga:o.harga||o.total||0}], alamatTujuan:o.alamatTujuan||o.tujuan||null, createdAt:Date.now()};
+  try{localStorage.setItem('tsa_beli_lagi', JSON.stringify(payload));localStorage.setItem('beliLagi', JSON.stringify(payload));}catch(_){}
+  window.location.href='./index.html?beliLagi='+encodeURIComponent(id);
+}
+window.beliLagi=beliLagi;window.confirmReceived=confirmReceived;
+function cardHTML(o){
+  const selesai=isSelesai(statusOf(o));
+  const btnConfirm = canConfirm(o) ? `<button class="btn" onclick="confirmReceived('${o.id}',this)">Konfirmasi Diterima</button>` : '';
+  const btnBeliLagi = selesai ? `<button class="btn btn-yellow" onclick="beliLagi('${o.id}')">🛒 Beli Lagi</button><div class="muted" style="text-align:center;margin-top:6px">Pesan ulang produk yang sama</div>` : '';
+  const btnLacak = !selesai ? `<a class="btn btn-outline" href="./lacak-kurir-pelanggan.html?orderId=${o.id}" style="margin-top:8px">📍 Lacak Kurir</a>` : '';
+  return `<div class="order-card"><div class="order-head"><span class="no">#${esc(o.nomorPesanan||o.id.slice(0,8))}</span><span class="${badgeClass(o)}">${esc(labelStatus(o))}</span></div><div class="row"><span>Tanggal</span><b>${fmt(o.createdAt)}</b></div><div class="row"><span>Produk</span><div style="text-align:right">${itemsText(o)}</div></div><div class="row"><span>Total</span><b>${rp(o.total||o.totalBayar||0)}</b></div>${btnConfirm?`<div style="margin-top:10px">${btnConfirm}</div>`:''}${btnLacak}${btnBeliLagi?`<div style="margin-top:10px">${btnBeliLagi}</div>`:''}</div>`;
+}
+function render(all){
+  window._all=all;
+  // Aktif = pending + dikemas + diantar (bukan selesai / batal) - urut prioritas pending/dikemas paling atas, lalu terbaru
+  const aktif=all.filter(o=>!isSelesai(statusOf(o))&&!isBatal(statusOf(o))).sort((a,b)=>{
+    const pa=prioritas(a), pb=prioritas(b); if(pa!==pb) return pa-pb;
+    const ta=a.createdAt?.seconds||0, tb=b.createdAt?.seconds||0; return tb-ta;
+  });
+  // Selesai = di bawah, urut terbaru dulu
+  const selesai=all.filter(o=>isSelesai(statusOf(o))).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  $('count').textContent=aktif.length+' aktif';
+  $('listAktif').innerHTML=aktif.length?aktif.map(cardHTML).join(''):'';
+  $('emptyAktif').style.display=aktif.length?'none':'block';
+  $('listSelesai').innerHTML=selesai.length?selesai.map(cardHTML).join(''):'';
+  $('emptySelesai').style.display=selesai.length?'none':'block';
+}
+onAuthStateChanged(auth, async u=>{
+  if(!u){window.location.href='./index.html';return;}
+  currentUser=u; $('uEmail').textContent=u.email||'';
+  const q=query(collection(db,'orders'), where('ownerUid','==',u.uid));
+  onSnapshot(q, snap=>{
+    const arr=snap.docs.map(d=>({id:d.id,...d.data()}));
+    // Fallback: kalau ownerUid kosong, cek juga userId/email di client
+    render(arr);
+  }, err=>{
+    // Fallback query tanpa where kalau rules / index bermasalah
+    onSnapshot(collection(db,'orders'), snap=>{
+      const arr=snap.docs.map(d=>({id:d.id,...d.data()})).filter(o=>o.ownerUid===u.uid||o.userId===u.uid||o.uid===u.uid||o.email===u.email);
+      render(arr);
+    });
+  });
+});
+</script>
+<script>
+// Fallback Beli Lagi tanpa module (kalau module gagal, tombol tetap jalan dari data yang sudah di-render)
+window.addEventListener('click', e=>{ const b=e.target.closest('[data-beli-lagi]'); if(b){ try{ const id=b.dataset.beliLagi; const o=(window._all||[]).find(x=>x.id===id); if(o) localStorage.setItem('tsa_beli_lagi', JSON.stringify({fromOrderId:id, items:o.items||[]})); }catch(_){} } });
+</script>
+<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body></html>

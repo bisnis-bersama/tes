@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="id"><head><style>
+@font-face {
+  font-family: "Optimistic";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Optimistic Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
+}
+:where(html) {
+  font-family: "Optimistic", system-ui, sans-serif;
+}
+:where(code, pre, kbd, samp) {
+  font-family: "Optimistic Mono", ui-monospace, monospace;
+}
+</style><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Keuangan Admin - Mode Bersih Pro | Toko Siap Antar</title>
+<style>
+:root{--yellow:#ffcc00;--bg:#f1f2f4;--muted:#64756f;--ink:#171717}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px/1.5 system-ui,sans-serif;color:var(--ink);padding-bottom:80px}
+.top{background:#111;color:#fff;padding:12px 16px 20px;border-radius:0 0 20px 20px}
+.topline{max-width:900px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.brand{color:var(--yellow);font-weight:900;font-size:16px;line-height:1.1}.sub{color:#c7cbd0;font-size:11px}
+.back{background:#222;border:1px solid #444;color:#fff;border-radius:10px;padding:7px 12px;font-size:12px;text-decoration:none;font-weight:700}
+main{max-width:900px;margin:-10px auto 0;padding:0 12px 80px}
+.panel{background:#fff;border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 4px 16px #00000008}
+.grid4{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{border:1px solid #eee;border-radius:14px;padding:12px;background:#fff}
+.card .ico{font-size:22px}.card .lbl{font-size:11px;color:var(--muted);margin-top:4px}.card .val{font-size:18px;font-weight:900;margin-top:2px}
+.card.dark{background:#111;color:#fff;border-color:#111}.card.dark .lbl{color:#c7cbd0}.card.dark .val{color:var(--yellow)}
+.card.yellow{background:#fffbe6;border-color:#f4df80}
+.card.blue{background:#eef6ff;border-color:#c8dcff}
+details{border:1px solid #eee;border-radius:12px;background:#fff;padding:0;margin-bottom:10px;overflow:hidden}
+details summary{list-style:none;cursor:pointer;padding:12px 14px;font-weight:800;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+details summary::-webkit-details-marker{display:none}
+details summary:after{content:"+";font-size:18px;color:#999}
+details[open ] summary:after{content:"-"}
+details .body{padding:0 14px 14px;font-size:12px;color:#555;line-height:1.6}
+.log{font-size:11px;color:#666;white-space:pre-wrap;background:#f7f8f8;border-radius:10px;padding:10px;max-height:120px;overflow:auto}
+.list{display:grid;gap:8px}.item{border:1px solid #eee;border-radius:12px;padding:10px;background:#fff;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.meta{font-size:11px;color:var(--muted)}.err{color:#b42318;background:#fdecea;border:1px solid #f5c6c1;border-radius:10px;padding:10px;font-size:12px}
+.btn{border:0;border-radius:10px;background:var(--yellow);padding:9px 14px;font-weight:800;cursor:pointer}
+</style></head>
+<body>
+<div class="top"><div class="topline"><div><div class="brand">TOKO SIAP ANTAR</div><div class="sub" id="accountNameTop">Keuangan Admin</div></div><a class="back" href="./ewallet-admin.html">← E-Wallet</a></div></div>
+<main>
+<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><h1 style="margin:0;font-size:18px">Keuangan</h1><div style="font-size:12px;color:var(--muted)">Saldo admin hanya 5%</div></div><button class="btn" onclick="location.reload()">↻ Muat Ulang</button></div>
+<div class="panel"><div class="grid4" id="cards">
+<div class="card dark"><div class="ico">💰</div><div class="lbl">Saldo Admin (Hanya 5%)</div><div class="val" id="saldoAdmin">Memuat...</div></div>
+<div class="card"><div class="ico">🧾</div><div class="lbl">Total Jual</div><div class="val" id="totalJual">Memuat...</div></div>
+<div class="card yellow"><div class="ico">🏪</div><div class="lbl">Modal Mitra</div><div class="val" id="totalModal">Memuat...</div><div style="font-size:10px;color:#666">Bukan uang admin</div></div>
+<div class="card blue"><div class="ico">🛵</div><div class="lbl">Ongkir Kurir</div><div class="val" id="totalOngkir">Memuat...</div><div style="font-size:10px;color:#666">Bukan uang admin</div></div>
+</div>
+<div style="margin-top:12px;background:#f7f8f8;border:1px solid #eee;border-radius:10px;padding:10px;font-size:12px;line-height:1.5">Contoh: Total Rp 100.000 = Modal Rp 80.000 + Ongkir Rp 15.000 + <b>Laba Admin 5% Rp 5.000</b>. Yang masuk saldo admin cuma Rp 5.000.</div>
+</div>
+<details><summary>ⓘ Info / Panduan</summary><div class="body">Admin hanya terima 5% dari mitra & kurir. Modal penjualan punya mitra, ongkir punya kurir. Saldo admin tidak termasuk modal & ongkir. Pencairan butuh verifikasi admin. Saldo masuk otomatis setelah pesanan selesai & disetujui.</div></details>
+<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font-size:14px">Transaksi Terbaru</h3><span style="font-size:11px;color:var(--muted)" id="txCount"></span></div><div class="list" id="content" style="margin-top:10px">Memuat...</div></div>
+<details><summary>Log</summary><div class="body"><div id="log" class="log"></div></div></details>
+</main>
+<script type="module">
+import {auth,db} from "./firebase-config.js";
+import {onAuthStateChanged} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import {doc,getDoc,collection,getDocs,query,where,limit} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function rupiah(n){return 'Rp '+(Number(n)||0).toLocaleString('id-ID');}
+function log(m){ const el=$("log"); if(el) el.textContent+="\n"+m; }
+async function requireAdmin(u){
+  const ps=await getDoc(doc(db,"users",u.uid));
+  if(!ps.exists()) throw new Error("Profil akun tidak ditemukan.");
+  const p=ps.data(), role=String(p.role||"").toLowerCase();
+  if(!["admin","superadmin"].includes(role)) throw new Error("Akses ditolak. Khusus Admin/Superadmin.");
+  if(p.status==="nonaktif" || p.aktif===false) throw new Error("Akun admin sedang nonaktif.");
+  return p;
+}
+async function loadAccountName(u){ try{ const s=await getDoc(doc(db,"users",u.uid)); const p=s.data(); if(p) $("accountNameTop").textContent="Halo, Kak, "+(p.nama||p.namaUsaha||u.email)+" • Keuangan"; }catch(e){} }
+onAuthStateChanged(auth, async u=>{
+  if(!u){ $("content").innerHTML='Login dulu lewat e-wallet.'; return; }
+  try{ await requireAdmin(u); }catch(e){ $("content").innerHTML='<div class="err">'+esc(e.message)+'</div>'; return; }
+  loadAccountName(u);
+  try{
+    const snap=await getDocs(query(collection(db,"orders"), where("status","==","terverifikasi"), limit(100)));
+    let jual=0, modal=0, ongkir=0, laba=0;
+    snap.forEach(d=>{ const o=d.data(); const total=Number(o.total||0); let sub=Number(o.subtotal ?? o.subTotal ?? o.mitraModalTotal ?? o.modalTotal ?? 0); let ong=Number(o.ongkir ?? o.ongkosKirim ?? 0); if(!sub && total && ong) sub=total-ong; if(!sub && total && !ong) sub=total; const fee=Number(o.adminFee ?? o.labaAdmin ?? 0) || Math.round(total*0.05); jual+=total; modal+=sub; ongkir+=ong; laba+=fee; });
+    $("saldoAdmin").textContent=rupiah(laba);
+    $("totalJual").textContent=rupiah(jual);
+    $("totalModal").textContent=rupiah(modal);
+    $("totalOngkir").textContent=rupiah(ongkir);
+    // Saldo admin dari admin_saldo juga, kalau ada, pakai itu biar konsisten dengan ewallet-admin
+    try{ const ad=await getDoc(doc(db,"admin_saldo","total")); if(ad.exists()) $("saldoAdmin").textContent=rupiah(Number(ad.data().saldo||laba)); }catch(_){}
+    const txSnap=await getDocs(query(collection(db,"wallet_transactions"), limit(30)));
+    $("txCount").textContent=txSnap.size+" transaksi";
+    let txHtml=txSnap.docs.map(d=>{ const t=d.data(); return `<div class="item"><div><strong>${esc(t.type)}</strong><div class="meta">${esc(t.nomorPesanan||t.orderId||'')}</div></div><strong>${rupiah(t.amount)}</strong></div>`; }).join('');
+    $("content").innerHTML=txHtml||'<div class="meta">Belum ada transaksi</div>';
+  }catch(e){ $("content").innerHTML='<div class="err">'+esc(e.message)+'</div>'; log(e.message); }
+});
+</script>
+<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body></html>
